@@ -36,7 +36,8 @@ def run_sort():
         f = cam.read()
         if not tmap.update(f):
             say("I can't see all four table tags."); break
-        objs = finder.find(f, tmap.tag_mask(f))
+        found = [p for p in finder.find(f, tmap.tag_mask(f)).values() if tmap.pickable(*p)]
+        objs = {i + 1: p for i, p in enumerate(found)}
         if not objs:
             say("All done."); break
         marked = draw_marks(f, objs, tmap.bins_px)
@@ -48,8 +49,14 @@ def run_sort():
             say(step.get("say", "Nothing left that fits.")); break
         say(f"{step.get('label', 'object')}, bin {step['bin']}")
         u, v = objs[step["object"]]
-        pick_and_place(arm, tmap.px_to_table(u, v), tmap.bin_xy(step["bin"]))
-    arm.home()
+        try:
+            if not pick_and_place(arm, tmap.px_to_table(u, v), tmap.bin_xy(step["bin"]),
+                                  should_stop=lambda: state["stop"]):
+                break
+        except ValueError as e:
+            print("[arm]", e); say("That's outside my safe area."); break
+    if not state["stop"]:
+        arm.home()
     state["mode"] = "idle"
 
 

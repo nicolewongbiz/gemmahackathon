@@ -11,9 +11,8 @@ uv tool install litert-lm || true
 mkdir -p models
 # Model download (set HF_TOKEN for faster, unthrottled downloads)
 uv pip install "huggingface_hub[cli]"
-hf download litert-community/gemma-4-E2B-it-litert-lm --local-dir models/e2b
-# Rename whatever .litertlm file came down to the name voice_agent.py expects:
-f=$(ls models/e2b/*.litertlm | head -1); ln -sf "$PWD/$f" models/gemma-4-E2B-it.litertlm
+# Exactly this file: the -gpu / -web variants have no audio/vision encoders.
+hf download litert-community/gemma-4-E2B-it-litert-lm gemma-4-E2B-it.litertlm --local-dir models
 echo "Smoke test:"
 litert-lm run --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm --prompt="Say hi in five words" || \
   echo "CLI flags may differ: run 'litert-lm --help'"

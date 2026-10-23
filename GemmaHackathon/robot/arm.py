@@ -7,13 +7,21 @@ import threading, time
 import config
 
 
+def check_workspace(x, y, z):
+    for name, v in (("x", x), ("y", y), ("z", z)):
+        lo, hi = config.WORKSPACE[name]
+        if not lo <= v <= hi:
+            raise ValueError(f"target {name}={v:.3f} m outside workspace [{lo}, {hi}]")
+
+
 class MockArm:
     def move_to(self, x, y, z):
+        check_workspace(x, y, z)
         print(f"[mock arm] move_to x={x:.3f} y={y:.3f} z={z:.3f}"); time.sleep(0.3)
     def gripper(self, v):
         print(f"[mock arm] gripper {v:.2f}"); time.sleep(0.2)
     def look(self):
-        print("[mock arm] look pose")
+        self.move_to(*config.LOOK_POSE)
     def home(self):
         print("[mock arm] home")
     def stop(self):
@@ -60,11 +68,14 @@ class KinovaArm:
             raise TimeoutError("Kinova action timed out")
 
     def move_to(self, x, y, z):
+        check_workspace(x, y, z)
         a = self.Base_pb2.Action()
         a.name, a.application_data = "cart", ""
         p = a.reach_pose.target_pose
         p.x, p.y, p.z = x, y, z + config.Z_TABLE_OFFSET
         p.theta_x, p.theta_y, p.theta_z = config.TOOL_ORIENT
+        s = a.reach_pose.constraint.speed
+        s.translation, s.orientation = config.MAX_LINEAR_SPEED, config.MAX_ANGULAR_SPEED
         self._run(a)
 
     def gripper(self, v):
@@ -99,13 +110,23 @@ def make_arm():
     return MockArm() if config.USE_MOCK_ARM else KinovaArm()
 
 
-def pick_and_place(arm, xy, bin_xy):
+def pick_and_place(arm, xy, bin_xy, should_stop=lambda: False):
+    """Returns False if stopped part-way. stop() only aborts the current motion, so check between steps."""
     x, y = xy
     bx, by = bin_xy
-    arm.gripper(config.GRIPPER_OPEN)
-    arm.move_to(x, y, config.Z_HOVER)
-    arm.move_to(x, y, config.Z_GRASP)
-    arm.gripper(config.GRIPPER_CLOSED)
-    arm.move_to(x, y, config.Z_HOVER)
-    arm.move_to(bx, by, config.Z_HOVER)
-    arm.gripper(config.GRIPPER_OPEN)
+    for target in (bin_xy, xy):
+        check_workspace(*target, config.Z_HOVER)
+    steps = [
+        lambda: arm.gripper(config.GRIPPER_OPEN),
+        lambda: arm.move_to(x, y, config.Z_HOVER),
+        lambda: arm.move_to(x, y, config.Z_GRASP),
+        lambda: arm.gripper(config.GRIPPER_CLOSED),
+        lambda: arm.move_to(x, y, config.Z_HOVER),
+        lambda: arm.move_to(bx, by, config.Z_HOVER),
+        lambda: arm.gripper(config.GRIPPER_OPEN),
+    ]
+    for step in steps:
+        if should_stop():
+            return False
+        step()
+    return True

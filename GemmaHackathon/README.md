@@ -12,6 +12,25 @@ Google Gemma Hardware Hackathon · AGI House · Oct 24, 2026 · Track: Physical 
 
 Everything below is in the order you do it.
 
+## Status and to-do (as of Oct 23)
+
+**Done and tested on the dev laptop (Windows, RTX 4070):** LiteRT-LM Gemma E4B on the GPU (teach ≈ 21 s, plan ≈ 3 s/step); the full intent flow with a mock arm and mock camera; AprilTag detection on the printable PDF; stop, workspace and bin filtering on a synthetic scene. The `.venv` has every package, including Kortex 2.8.0, and the model is in `data/`.
+
+**Not tested yet (needs hardware):** the real arm, the wrist camera stream, calibration, and the Pi voice path.
+
+**Tonight:**
+- [ ] Print `tags/apriltags.pdf` at 100% and check the 5 cm bar (§1)
+- [ ] Flash the Pi with 64-bit Raspberry Pi OS, copy `pi/` over, run `bash setup_pi.sh` (§3)
+- [ ] Pi: `python voice_agent.py --text` works with the laptop server running (§7)
+- [ ] Pack the hardware list (§1): Ethernet ×2 + USB-Ethernet adapter, mic, speaker, bins, objects, tape measure
+
+**On site, in order:**
+- [ ] Network: laptop ↔ arm, laptop ↔ Pi (§4)
+- [ ] Camera stream plays; `python -m scripts.test_gemma` (§5)
+- [ ] Tape the tags, measure `TABLE_TAGS`, find `LOOK_POSE`, reach CALIBRATED (§6)
+- [ ] `test_click_pick`: tune `Z_GRASP`, `TOOL_ORIENT`, `GRIPPER_CLOSED` (§6)
+- [ ] Full voice loop; record a 60 s backup video by 7 PM; rehearse ×3 (§7–8)
+
 ---
 
 ## 0. How it works
@@ -31,7 +50,7 @@ Design rules:
 - **Gemma never outputs coordinates.** It picks a numbered mark and a bin letter, and deterministic code turns that into metres. VLMs point imprecisely but choose well from labelled options.
 - **Every Gemma call returns one JSON object.** The code extracts the first `{...}`, retries up to 2 times, and rejects any object id that wasn't drawn.
 - **The camera is on the wrist (eye-in-hand).** Perception only uses frames taken at `LOOK_POSE`, so `empty`, `teach` and each sort step call `arm.look()` first. The homography is recomputed from the tags in every frame.
-- **Safety:** slow moves, `stop` halts the arm immediately, and someone keeps a hand on the physical E-stop.
+- **Safety:** every move is speed-limited (`MAX_LINEAR_SPEED`) and checked against `WORKSPACE`. `stop` aborts the current motion and the rest of the pick, and the arm stays where it is. Someone keeps a hand on the physical E-stop anyway.
 
 ### Files
 
@@ -48,6 +67,7 @@ pi/voice_agent.py      Pi voice front end (Gemma E2B, push-to-talk, espeak)
 pi/setup_pi.sh         one-shot Pi install
 scripts/test_gemma.py  one camera frame → Gemma → JSON + latency
 scripts/test_click_pick.py  click a pixel → arm picks there
+tags/apriltags.pdf     print-ready AprilTags (tags/make_tags.py regenerates it)
 archive/webcam/        old USB-webcam reader, disabled (see §9)
 ```
 
@@ -66,7 +86,7 @@ archive/webcam/        old USB-webcam reader, disabled (see §9)
 | Tape, tape measure, marker, power strip | |
 | **AprilTags**, family **tag36h11**, IDs **0, 1, 2, 3, 10, 11** | See below |
 
-**Printing the tags:** get the PNGs from the AprilRobotics `apriltag-imgs` GitHub repo (folder `tag36h11/`, files `tag36_11_00000.png` and so on). Scale them so the **black square measures exactly 5.0 cm** (`TAG_SIZE_M`), and print at 100%. Print spares.
+**Printing the tags:** print **`tags/apriltags.pdf`** on US Letter at **100% / "Actual size"**, not "Fit to page". Page 1 has all six labelled tags and page 2 has spares. Check the 5 cm bar at the top with a ruler: the black squares must measure 5.0 cm (`TAG_SIZE_M`). Cut along the grey lines and leave the white border on. To regenerate the PDF after changing the IDs or the size in `config.py`, run `python tags/make_tags.py`.
 
 | ID | Goes on |
 |---|---|
@@ -91,11 +111,12 @@ pip install -r requirements-laptop.txt
 ```
 Use Python **3.11**. Newer versions can lack wheels for `pupil-apriltags`, and Kortex needs the old `protobuf`.
 
-**Kortex API** (not on PyPI): download `kortex_api-2.x.x-py3-none-any.whl` from Kinova's Artifactory (linked in the `Kinovarobotics/Kinova-kortex2_Gen3_G3L` README), then:
+**Kortex API** (not on PyPI, but a public download with no login):
 ```bash
-pip install kortex_api-*.whl
-pip install "protobuf==3.20.*"     # if kortex_api fails to import
+curl -LO https://artifactory.kinovaapps.com/artifactory/generic-local-public/kortex/API/2.8.0/kortex_api-2.8.0.post5-py3-none-any.whl
+pip install kortex_api-2.8.0.post5-py3-none-any.whl     # pulls protobuf 3.20, which is what it needs
 ```
+Older versions (2.6, 2.7) live next to it on Kinova's Artifactory if the arm's firmware is old. `*.whl` is gitignored.
 
 **Gemma 4 E4B model** → `data/gemma-4-E4B-it.litertlm` (3.7 GB):
 ```bash
@@ -184,6 +205,11 @@ Set `USE_MOCK_CAMERA = True` to run anything without the arm (it returns grey fr
    | `TOOL_ORIENT` | (180, 0, 90) | gripper not pointing straight down → read it from the Web App |
    | `GRIPPER_CLOSED` | 0.7 | drops objects → raise; crushes them → lower |
    | `BIN_DROP` | ±0.40 m y | used only when the bin tags aren't visible |
+   | `BIN_RADIUS_M` | 0.12 m | objects in a bin get picked again → raise; objects next to a bin get ignored → lower |
+   | `WORKSPACE` | x 0.20–0.75, y ±0.50, z 0–0.70 m | any target outside it is refused. It must contain the tags, both bins and `LOOK_POSE` |
+   | `MAX_LINEAR_SPEED` | 0.10 m/s | keep it slow near people |
+
+   Only objects **inside the rectangle of tags 0–3** and more than `BIN_RADIUS_M` from a bin are offered to Gemma. Put the bins **outside** that rectangle.
 
 ---
 
@@ -254,6 +280,8 @@ The latest marked image Gemma saw is saved to `data/last_marked.jpg`.
 | Shadows detected as objects | Diffuse the lighting, retake `empty`, raise the threshold in `ObjectFinder.find` |
 | Two touching objects become one | Space the objects out |
 | Pick is offset | Re-measure `TABLE_TAGS`. Tall objects shift outward, so keep the look pose high and vertical |
+| Arm says "That's outside my safe area" | A target fell outside `WORKSPACE`. Check `TABLE_TAGS` / bin positions, then widen `WORKSPACE` only if the table really extends there |
+| An object on the table is ignored | It's outside the tag 0–3 rectangle or within `BIN_RADIUS_M` of a bin |
 | `kortex_api` import error | `pip install "protobuf==3.20.*"` |
 | Arm action aborts | Target unreachable: move the table or bins closer, check `TOOL_ORIENT`, clear faults in the Web App |
 | Gripper doesn't close | Robotiq 2F-85 uses 0–1. Tune `GRIPPER_CLOSED` |

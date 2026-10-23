@@ -40,6 +40,16 @@ class TableMap:
             return self.px_to_table(*self.bins_px[name])
         return config.BIN_DROP[name][:2]
 
+    def pickable(self, u, v):
+        """On the table (inside the corner-tag rectangle) and not already in a bin."""
+        x, y = self.px_to_table(u, v)
+        xs = [p[0] for p in config.TABLE_TAGS.values()]
+        ys = [p[1] for p in config.TABLE_TAGS.values()]
+        if not (min(xs) <= x <= max(xs) and min(ys) <= y <= max(ys)):
+            return False
+        return all(np.hypot(x - bx, y - by) > config.BIN_RADIUS_M
+                   for bx, by in (self.bin_xy("A"), self.bin_xy("B")))
+
     def tag_mask(self, frame):
         """Mask (255 = tag) so tags are not proposed as objects."""
         mask = np.zeros(frame.shape[:2], np.uint8)

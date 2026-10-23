@@ -51,3 +51,9 @@ Z_TABLE_OFFSET = 0.0              # table height in base frame
 TOOL_ORIENT = (180.0, 0.0, 90.0)  # theta_x, theta_y, theta_z (deg) = pointing straight down
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.7
 BIN_DROP = {"A": (0.45, -0.40, 0.15), "B": (0.45, 0.40, 0.15)}  # fallback if bin tags not seen
+BIN_RADIUS_M = 0.12               # objects this close to a bin tag count as already sorted
+MAX_LINEAR_SPEED = 0.10           # m/s
+MAX_ANGULAR_SPEED = 20.0          # deg/s
+# Every arm target must be inside this box (base frame, m, z above table) or the move is refused.
+# Must contain the table tags, both bins and LOOK_POSE. Tune to your table.
+WORKSPACE = {"x": (0.20, 0.75), "y": (-0.50, 0.50), "z": (0.0, 0.70)}

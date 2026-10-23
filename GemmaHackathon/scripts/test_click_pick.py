@@ -17,7 +17,10 @@ while True:
     if clicks and tm.H is not None:
         xy = tm.px_to_table(*clicks.pop())
         print("pick at", xy)
-        pick_and_place(arm, xy, tm.bin_xy("A"))
+        try:
+            pick_and_place(arm, xy, tm.bin_xy("A"))
+        except ValueError as e:
+            print("refused:", e)
         arm.look()
     if cv2.waitKey(1) == 27:
         break

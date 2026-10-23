@@ -4,3 +4,4 @@ data/*
 pi/models/
 *.wav
 .venv/
+*.whl
