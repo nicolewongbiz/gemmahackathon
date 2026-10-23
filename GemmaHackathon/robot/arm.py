@@ -12,6 +12,8 @@ class MockArm:
         print(f"[mock arm] move_to x={x:.3f} y={y:.3f} z={z:.3f}"); time.sleep(0.3)
     def gripper(self, v):
         print(f"[mock arm] gripper {v:.2f}"); time.sleep(0.2)
+    def look(self):
+        print("[mock arm] look pose")
     def home(self):
         print("[mock arm] home")
     def stop(self):
@@ -73,6 +75,10 @@ class KinovaArm:
         f.finger_identifier, f.value = 1, v
         self.base.SendGripperCommand(cmd)
         time.sleep(1.0)
+
+    def look(self):
+        self.move_to(*config.LOOK_POSE)
+        time.sleep(0.3)   # let the wrist settle so the frame isn't motion-blurred
 
     def home(self):
         B = self.Base_pb2

@@ -50,8 +50,11 @@ class TableMap:
 
 
 if __name__ == "__main__":
-    from perception.camera import Camera
-    cam, tm = Camera(), TableMap()
+    from perception.camera import make_camera
+    from robot.arm import make_arm
+    arm = make_arm()
+    arm.look()
+    cam, tm = make_camera(), TableMap()
     clicked = []
     cv2.namedWindow("calib")
     cv2.setMouseCallback("calib", lambda e, x, y, *_: clicked.append((x, y)) if e == cv2.EVENT_LBUTTONDOWN else None)

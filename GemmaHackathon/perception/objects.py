@@ -1,6 +1,7 @@
 """Find objects by differencing against an empty-table snapshot, then draw numbered marks."""
 import cv2
 import numpy as np
+import config
 
 MIN_AREA = 600   # px^2, tune for camera height
 
@@ -67,7 +68,7 @@ class KeyframeRecorder:
                     self.changed = False
         self.prev = small
 
-    def result(self, max_frames=6):
+    def result(self, max_frames=config.KEYFRAME_MAX):
         f = self.frames
         if len(f) > max_frames:
             idx = np.linspace(0, len(f) - 1, max_frames).astype(int)

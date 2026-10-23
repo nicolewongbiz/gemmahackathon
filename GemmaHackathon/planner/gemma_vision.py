@@ -4,9 +4,8 @@ Backends:
   litert  - LiteRT-LM Python API (pip install litert-lm-api)
   ollama  - local Ollama server, fallback
 
-NOTE: The exact LiteRT-LM Python argument names for GPU + vision were not verified
-before the event. If litert init fails, run scripts/test_gemma.py, read the error,
-check `python -c "import litert_lm; help(litert_lm.Engine)"` and fix _litert_engine().
+The model must be gemma-4-E4B-it.litertlm. The -gpu / -web variants have no vision encoder
+and fail with "Failed to create conversation" when given an image.
 """
 import base64, json, re
 from pathlib import Path
@@ -22,18 +21,11 @@ def _litert_engine():
     if _engine is not None:
         return _engine
     import litert_lm
-    kwargs = {}
-    # Try GPU backend + vision; adjust names after `help(litert_lm.Engine)`.
-    Backend = getattr(litert_lm, "Backend", None)
-    if Backend is not None:
-        kwargs["backend"] = getattr(Backend, "GPU", None) or Backend.CPU
-        if hasattr(Backend, "CPU"):
-            kwargs["vision_backend"] = getattr(Backend, "GPU", Backend.CPU)
-    try:
-        _engine = litert_lm.Engine(config.LITERT_MODEL, **kwargs)
-    except TypeError:
-        print("[gemma] Engine kwargs rejected, retrying with defaults:", kwargs)
-        _engine = litert_lm.Engine(config.LITERT_MODEL)
+    B = litert_lm.Backend
+    # Measured on RTX 4070 / Windows, litert-lm-api 0.18.1: GPU text + CPU vision ≈ 3.5 s/call,
+    # faster than GPU vision (≈ 5.4 s).
+    _engine = litert_lm.Engine(config.LITERT_MODEL, backend=B.GPU, vision_backend=B.CPU,
+                               max_num_images=config.KEYFRAME_MAX)
     return _engine
 
 
@@ -65,7 +57,7 @@ def _ask_ollama(prompt, images, system):
         {"role": "user", "content": prompt, "images": imgs}]
     r = requests.post(f"{config.OLLAMA_URL}/api/chat", json={
         "model": config.OLLAMA_MODEL, "messages": msgs, "stream": False,
-        "format": "json", "options": {"temperature": 0.2}}, timeout=120)
+        "format": "json", "keep_alive": "2h", "options": {"temperature": 0.2}}, timeout=120)
     r.raise_for_status()
     return r.json()["message"]["content"]
 

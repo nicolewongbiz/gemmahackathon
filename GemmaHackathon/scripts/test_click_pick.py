@@ -2,11 +2,12 @@
     python -m scripts.test_click_pick
 """
 import cv2
-from perception.camera import Camera
+from perception.camera import make_camera
 from perception.calibrate import TableMap
 from robot.arm import make_arm, pick_and_place
 
-cam, tm, arm = Camera(), TableMap(), make_arm()
+cam, tm, arm = make_camera(), TableMap(), make_arm()
+arm.look()
 clicks = []
 cv2.namedWindow("pick")
 cv2.setMouseCallback("pick", lambda e, x, y, *_: clicks.append((x, y)) if e == cv2.EVENT_LBUTTONDOWN else None)
@@ -17,5 +18,6 @@ while True:
         xy = tm.px_to_table(*clicks.pop())
         print("pick at", xy)
         pick_and_place(arm, xy, tm.bin_xy("A"))
+        arm.look()
     if cv2.waitKey(1) == 27:
         break

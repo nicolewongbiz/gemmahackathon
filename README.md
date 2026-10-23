@@ -9,10 +9,10 @@ A robot arm that learns a sorting chore from a single human demonstration, expla
 
 - **Raspberry Pi 5** runs Gemma 4 E2B (LiteRT-LM) as a voice interface — audio in, intent JSON out.
 - **Laptop (RTX 4070)** runs Gemma 4 E4B (LiteRT-LM, with an Ollama fallback) as the vision planner.
-- A webcam + AprilTags locate objects and bins; Gemma only chooses *which numbered object goes in which bin*, deterministic code turns that into a Kinova Kortex pick-and-place.
+- The Kinova's wrist camera + AprilTags locate objects and bins; Gemma only chooses *which numbered object goes in which bin*, deterministic code turns that into a Kinova Kortex pick-and-place.
 - Supports live correction: "actually, red things go in B" rewrites the rule on the fly.
 
-See [GemmaHackathon/README.md](GemmaHackathon/README.md) for the full writeup, architecture, and setup guides.
+See [GemmaHackathon/README.md](GemmaHackathon/README.md). It's one step-by-step guide covering setup, AprilTags, calibration, running, the demo, and troubleshooting.
 
 ### [GemmaHackathonBasic](GemmaHackathonBasic/) — Gemma ⇄ Kinova chat
 A simpler chat interface to the same arm: type plain-English commands ("move the hand 5 cm forward", "rotate the wrist 20 degrees", "go home") and Gemma 4 (LiteRT-LM, laptop-only) turns them into validated, speed- and workspace-limited Kortex moves.
@@ -26,7 +26,7 @@ See [GemmaHackathonBasic/README.md](GemmaHackathonBasic/README.md) for setup and
 | Laptop, NVIDIA RTX 4070 (8 GB) | Runs Gemma (LiteRT-LM) + arm control |
 | Kinova Gen3 / Gen3 lite | Manipulator (Kortex API), Ethernet-connected |
 | Raspberry Pi 5 | Voice agent (GemmaHackathon only) |
-| USB webcam + AprilTags | Scene perception (GemmaHackathon only) |
+| Kinova Vision module (wrist camera) + AprilTags | Scene perception (GemmaHackathon only) |
 
 ## License
 

@@ -1,4 +1,4 @@
-"""Laptop app: camera + AprilTags + Gemma planner + Kinova + HTTP for the Pi.
+"""Laptop app: Kinova wrist camera + AprilTags + Gemma planner + Kinova + HTTP for the Pi.
 
     uvicorn main:app --host 0.0.0.0 --port 8000
 Keyboard fallback (no Pi): POST /intent from curl, or use the /docs page.
@@ -8,7 +8,7 @@ import cv2
 from fastapi import FastAPI
 from pydantic import BaseModel
 import config
-from perception.camera import Camera
+from perception.camera import make_camera
 from perception.calibrate import TableMap
 from perception.objects import ObjectFinder, KeyframeRecorder, draw_marks
 from planner.brain import Brain
@@ -16,7 +16,7 @@ from robot.arm import make_arm, pick_and_place
 
 config.DATA.mkdir(exist_ok=True)
 app = FastAPI(title="Show Me Once")
-cam, tmap, finder, brain, arm = Camera(), TableMap(), ObjectFinder(), Brain(), make_arm()
+cam, tmap, finder, brain, arm = make_camera(), TableMap(), ObjectFinder(), Brain(), make_arm()
 say_q: "queue.Queue[str]" = queue.Queue()
 state = {"mode": "idle", "stop": False}
 recorder = None
@@ -32,6 +32,7 @@ def run_sort():
     for _ in range(12):
         if state["stop"]:
             break
+        arm.look()
         f = cam.read()
         if not tmap.update(f):
             say("I can't see all four table tags."); break
@@ -55,6 +56,7 @@ def run_sort():
 def teach_loop():
     global recorder
     recorder = KeyframeRecorder()
+    arm.look()
     while state["mode"] == "teaching":
         recorder.push(cam.read())
         time.sleep(1 / 15)
@@ -68,7 +70,7 @@ class Intent(BaseModel):
 @app.post("/intent")
 def intent(i: Intent):
     if i.intent == "empty":
-        finder.snapshot_empty(cam.read()); say("Saved the empty table.")
+        arm.look(); finder.snapshot_empty(cam.read()); say("Saved the empty table.")
     elif i.intent == "teach":
         state["mode"] = "teaching"
         threading.Thread(target=teach_loop, daemon=True).start()
