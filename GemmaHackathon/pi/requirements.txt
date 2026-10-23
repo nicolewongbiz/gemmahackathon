@@ -1,0 +1,7 @@
+litert-lm-api
+sounddevice
+soundfile
+numpy
+requests
+# optional fallback speech-to-text:
+# vosk

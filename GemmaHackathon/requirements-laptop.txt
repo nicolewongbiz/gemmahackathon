@@ -1,0 +1,9 @@
+litert-lm-api
+opencv-python
+pupil-apriltags
+numpy
+fastapi
+uvicorn
+requests
+# Kortex API is NOT on PyPI: download kortex_api-2.x.whl from Kinova's Artifactory
+# then: pip install kortex_api-2.6.0.post3-py3-none-any.whl
