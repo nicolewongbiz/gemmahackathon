@@ -86,3 +86,7 @@ SIM_BALL_MASS = 0.0027                    # kg (ping-pong ball = 2.7 g)
 SIM_BOX_SIZE = (0.15, 0.15, 0.08)         # m: outer x, y, wall height
 SIM_BOX_XY = (0.45, -0.40)                # box centre in the base frame
 SIM_TAG_ERROR_M = 0.005                   # std dev of tape-measure error on TABLE_TAGS in randomised trials
+# Sorting sim (sim/sort.py): bins with their tag on the floor; the wrist camera at LOOK_POSE sees y within +-0.42
+SIM_BIN_XY = {"A": (0.45, -0.35), "B": (0.45, 0.35)}
+SIM_BIN_SIZE = (0.16, 0.16, 0.06)         # m: outer x, y, wall height
+SIM_OBJ_SIZE = 0.04                       # m: ball diameter / block side, about what Z_GRASP was tuned for

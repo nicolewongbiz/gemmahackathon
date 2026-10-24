@@ -82,7 +82,7 @@ pi/setup_pi.sh         one-shot Pi install
 scripts/test_gemma.py  one camera frame → Gemma → JSON + latency
 scripts/test_click_pick.py  click a pixel → arm picks there
 scripts/ball_to_box.py white ball → blue box, no Gemma (runs on the arm or in sim/)
-sim/                   MuJoCo sim of the cell: Gen3 + 2F-85, tags, ball, box (see §10)
+sim/                   MuJoCo sim of the cell: Gen3 + 2F-85, tags, ball → box, and sorting with Gemma (see §10)
 tags/apriltags.pdf     print-ready AprilTags (tags/make_tags.py regenerates it)
 archive/webcam/        old USB-webcam reader, disabled (see §9)
 ```
@@ -371,6 +371,28 @@ Any config value can be overridden with `--set NAME=value`. Success is ground tr
 | `KinovaArm._run` | abort counted as success | abort raises | an unreachable move used to carry on to the next step |
 
 Now 30/30 randomised trials. Not modelled: a real ping-pong ball bounces a lot more than the sim's, so put a cloth in the box. The box at `BIN_DROP` A runs off the frame, so the script drops at `BIN_DROP` and confirms with a blue-ring check around the ball.
+
+### Sorting with Gemma (`sim/sort.py`)
+
+The full "Show Me Once" loop with the real Gemma planner (`planner/brain.py`, LiteRT-LM, `data/gemma-4-E4B-it.litertlm`) and the real `LocalEyes`, `pick_and_place` and sort loop from `main.py`:
+
+1. Empty-table snapshot at `LOOK_POSE`.
+2. **Teach:** a simulated person puts 4 demo objects into the bins by a hidden rule. Colour and shape both vary, so only one rule fits. The settled wrist-camera frames, with BIN A / BIN B drawn on them, go to `brain.teach`.
+3. 6 new objects (red or blue, 4 cm balls or blocks) land at random spots on the table.
+4. **Sort:** numbered marks → `brain.plan` picks the object and the bin → `pick_and_place`, until the table is clear.
+5. With `--correct`: `brain.correct("actually, red things go in B")`, then a second batch.
+
+Gemma's choices are scored against the hidden rule separately from where the objects end up, so an arm fumble isn't blamed on Gemma.
+
+```bash
+sim/.venv/bin/python -m sim.sort                         # colour rule, video → sim/out/sort.mp4, Gemma's images → sim/out/
+sim/.venv/bin/python -m sim.sort --rule shape            # balls → A, blocks → B
+sim/.venv/bin/python -m sim.sort --correct               # + spoken correction and a second batch
+sim/.venv/bin/python -m sim.sort --trials 3 --correct    # both rules × 3 random layouts, score table
+```
+`--labels` adds the eyes node's labelling call (the laptop model stands in for the Jetson's E2B). Bins are `SIM_BIN_XY` / `SIM_BIN_SIZE`. On an M5 Mac: teach ≈ 25 s, plan ≈ 5 s per object, about 3 minutes per batch of 6.
+
+Found in the sim: once a couple of objects land on a bin tag, the camera loses that tag and the code falls back to `BIN_DROP`. **Set `BIN_DROP` to the real bin centres on site**, or tape each bin tag beside the drop spot instead of under it.
 
 ---
 

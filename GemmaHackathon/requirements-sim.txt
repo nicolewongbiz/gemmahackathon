@@ -1,6 +1,8 @@
-# MuJoCo sim of the ball -> box task (sim/). Separate venv, any Python >= 3.10:
+# MuJoCo sims (sim/): ball -> box, and sorting with Gemma. Separate venv, any Python >= 3.10:
 #   uv venv sim/.venv --python 3.12 && uv pip install --python sim/.venv/bin/python -r requirements-sim.txt
 mujoco>=3.3
 numpy
 opencv-python
 pupil-apriltags
+litert-lm-api==0.18.1   # sim/sort.py runs the real Gemma planner (model: data/gemma-4-E4B-it.litertlm)
+requests

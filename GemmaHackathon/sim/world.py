@@ -51,6 +51,34 @@ def tag_texture(tid):
     return path
 
 
+def add_tag(spec, wb, tid, x, y, z):
+    half = config.TAG_SIZE_M * 10 / 8 / 2           # black square + 1-cell quiet zone on each side
+    spec.add_texture(name=f"tag{tid}", type=mujoco.mjtTexture.mjTEXTURE_2D, file=str(tag_texture(tid)))
+    mat = spec.add_material(name=f"tag{tid}", specular=0, shininess=0)
+    mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = f"tag{tid}"
+    mesh = spec.add_mesh(name=f"tag{tid}")
+    mesh.uservert = [-half, -half, 0, half, -half, 0, half, half, 0, -half, half, 0]
+    mesh.usertexcoord = [0, 1, 1, 1, 1, 0, 0, 0]
+    mesh.userface = [0, 1, 2, 0, 2, 3]
+    mesh.inertia = mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL
+    # Tag image "up" points along -x (towards the arm) — detection doesn't care about rotation
+    wb.add_geom(name=f"tag{tid}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"tag{tid}", material=f"tag{tid}",
+                pos=[x, y, z], quat=[np.cos(np.pi / 4), 0, 0, np.sin(np.pi / 4)], contype=0, conaffinity=0)
+
+
+def add_tray(wb, name, xy, yaw, size, rgba):
+    """Open-top box: floor + 4 walls. size = outer (x, y, wall height)."""
+    bx, by, bh = size[0] / 2, size[1] / 2, size[2]
+    t = 0.004
+    body = wb.add_body(name=name, pos=[*xy, 0], quat=[np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
+    for part, sz, pos in (("floor", [bx, by, t / 2], [0, 0, t / 2]),
+                          ("wall_px", [t / 2, by, bh / 2], [bx - t / 2, 0, bh / 2]),
+                          ("wall_nx", [t / 2, by, bh / 2], [-bx + t / 2, 0, bh / 2]),
+                          ("wall_py", [bx, t / 2, bh / 2], [0, by - t / 2, bh / 2]),
+                          ("wall_ny", [bx, t / 2, bh / 2], [0, -by + t / 2, bh / 2])):
+        body.add_geom(name=f"{name}_{part}", type=mujoco.mjtGeom.mjGEOM_BOX, size=sz, pos=pos, rgba=rgba)
+
+
 def build_model(scene):
     """scene: dict from sample_scene(). Returns a compiled MjModel."""
     spec = mujoco.MjSpec.from_file(str(MENAGERIE / "kinova_gen3" / "gen3.xml"))
@@ -79,48 +107,44 @@ def build_model(scene):
                 material="black_table", friction=[0.8, 0.005, 0.0001])
 
     # AprilTags lying flat where they really are (scene["tag_xy"] = config + tape-measure error)
-    half = config.TAG_SIZE_M * 10 / 8 / 2           # black square + 1-cell quiet zone on each side
     for tid, (x, y) in scene["tag_xy"].items():
-        spec.add_texture(name=f"tag{tid}", type=mujoco.mjtTexture.mjTEXTURE_2D, file=str(tag_texture(tid)))
-        mat = spec.add_material(name=f"tag{tid}", specular=0, shininess=0)
-        mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = f"tag{tid}"
-        mesh = spec.add_mesh(name=f"tag{tid}")
-        mesh.uservert = [-half, -half, 0, half, -half, 0, half, half, 0, -half, half, 0]
-        mesh.usertexcoord = [0, 1, 1, 1, 1, 0, 0, 0]
-        mesh.userface = [0, 1, 2, 0, 2, 3]
-        mesh.inertia = mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL
-        # Tag image "up" points along -x (towards the arm) — detection doesn't care about rotation
-        wb.add_geom(name=f"tag{tid}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"tag{tid}", material=f"tag{tid}",
-                    pos=[x, y, 0.0004], quat=[np.cos(np.pi / 4), 0, 0, np.sin(np.pi / 4)],
-                    contype=0, conaffinity=0)
+        add_tag(spec, wb, tid, x, y, 0.0004)
 
-    # White ball
-    r = scene["ball_r"]
-    ball = wb.add_body(name="ball", pos=[*scene["ball_xy"], r + 0.0005])
-    ball.add_freejoint()
-    ball.add_geom(name="ball", type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[r, 0, 0], mass=scene["ball_mass"],
-                  rgba=[0.93, 0.93, 0.93, 1], condim=6, friction=[scene["ball_friction"], 0.005, 0.0005],
-                  solref=[0.004, 1])
+    # White ball (ball -> box task)
+    if "ball_xy" in scene:
+        r = scene["ball_r"]
+        ball = wb.add_body(name="ball", pos=[*scene["ball_xy"], r + 0.0005])
+        ball.add_freejoint()
+        ball.add_geom(name="ball", type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[r, 0, 0], mass=scene["ball_mass"],
+                      rgba=[0.93, 0.93, 0.93, 1], condim=6, friction=[scene["ball_friction"], 0.005, 0.0005],
+                      solref=[0.004, 1])
 
-    # Open-top blue box
-    bx, by, bh = config.SIM_BOX_SIZE[0] / 2, config.SIM_BOX_SIZE[1] / 2, config.SIM_BOX_SIZE[2]
-    t = 0.004
-    box = wb.add_body(name="box", pos=[*scene["box_xy"], 0], quat=[np.cos(scene["box_yaw"] / 2), 0, 0,
-                                                                   np.sin(scene["box_yaw"] / 2)])
-    blue = [0.08, 0.28, 0.85, 1]
-    for name, size, pos in (("floor", [bx, by, t / 2], [0, 0, t / 2]),
-                            ("wall_px", [t / 2, by, bh / 2], [bx - t / 2, 0, bh / 2]),
-                            ("wall_nx", [t / 2, by, bh / 2], [-bx + t / 2, 0, bh / 2]),
-                            ("wall_py", [bx, t / 2, bh / 2], [0, by - t / 2, bh / 2]),
-                            ("wall_ny", [bx, t / 2, bh / 2], [0, -by + t / 2, bh / 2])):
-        box.add_geom(name=f"box_{name}", type=mujoco.mjtGeom.mjGEOM_BOX, size=size, pos=pos, rgba=blue)
+    # Open-top blue box (ball -> box task)
+    if "box_xy" in scene:
+        add_tray(wb, "box", scene["box_xy"], scene["box_yaw"], config.SIM_BOX_SIZE, [0.08, 0.28, 0.85, 1])
+
+    # Sorting task: grey bins with their tag (10 = A, 11 = B) on the floor, where pick_and_place drops
+    tag_ids = {v: k for k, v in config.BIN_TAGS.items()}
+    for name, (x, y) in scene.get("bins", {}).items():
+        add_tray(wb, f"bin_{name}", (x, y), 0.0, config.SIM_BIN_SIZE, [0.55, 0.55, 0.58, 1])
+        add_tag(spec, wb, tag_ids[name], x, y, 0.0044)
+
+    # Sorting task objects: {"name", "type": "sphere" | "box", "size", "rgba", "mass", "pos"}
+    for o in scene.get("objects", []):
+        b = wb.add_body(name=o["name"], pos=o["pos"])
+        b.add_freejoint()
+        gtype = mujoco.mjtGeom.mjGEOM_SPHERE if o["type"] == "sphere" else mujoco.mjtGeom.mjGEOM_BOX
+        b.add_geom(name=o["name"], type=gtype, size=o["size"], rgba=o["rgba"], mass=o["mass"], condim=4,
+                   friction=[0.9, 0.005, 0.0005])
 
     # Overview camera for videos (front-right, looking at the work area)
     wb.add_camera(name="overview", pos=[1.35, -0.85, 0.85], xyaxes=[0.53, 0.85, 0, -0.32, 0.2, 0.93], fovy=50)
 
     # The Gen3's controller cancels gravity; without this the sim arm sags ~5 mm and grasp heights shift
+    loose = {"world", "ball", "box"} | {f"bin_{n}" for n in scene.get("bins", {})} | \
+            {o["name"] for o in scene.get("objects", [])}
     for b in spec.bodies:
-        if b.name not in ("world", "ball", "box"):
+        if b.name not in loose:
             b.gravcomp = 1
     spec.add_exclude(bodyname1="base_link", bodyname2="world")
     # base_link is welded to the world, so MuJoCo's parent/child filter doesn't cover it: without this the
@@ -168,17 +192,20 @@ class SimWorld:
         home = self.m.key("home")
         self.q_home = home.qpos[self.qadr].copy()
         mujoco.mj_resetDataKeyframe(self.m, self.d, home.id)
-        # the keyframe only covers the arm; put the ball back where the scene says
-        ball_q = self.m.joint(self.m.body("ball").jntadr[0]).qposadr[0]
-        self.d.qpos[ball_q:ball_q + 3] = [*self.scene["ball_xy"], self.scene["ball_r"] + 0.0005]
-        self.d.qpos[ball_q + 3:ball_q + 7] = [1, 0, 0, 0]
+        # the keyframe only covers the arm; put the ball / objects back where the scene says
+        for j in range(self.m.njnt):
+            if self.m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE:
+                a = self.m.jnt_qposadr[j]
+                self.d.qpos[a:a + 7] = self.m.qpos0[a:a + 7]
         self.d.ctrl[self.arm_act] = self.q_home
         mujoco.mj_forward(self.m, self.d)
         self.robot_bodies = self._subtree("shoulder_link")
         self.pad_geoms = {self.m.geom(n).id for n in ("g_left_pad1", "g_left_pad2", "g_right_pad1", "g_right_pad2")}
-        self.env_geoms = {i for i in range(self.m.ngeom)
-                          if self.m.geom_bodyid[i] in (0, self.m.body("box").id)}
-        self.ball_geom = self.m.geom("ball").id
+        trays = (["box"] if "box_xy" in self.scene else []) + [f"bin_{n}" for n in self.scene.get("bins", {})]
+        tray_ids = [0] + [self.m.body(n).id for n in trays]
+        self.env_geoms = {i for i in range(self.m.ngeom) if self.m.geom_bodyid[i] in tray_ids}
+        loose = (["ball"] if "ball_xy" in self.scene else []) + [o["name"] for o in self.scene.get("objects", [])]
+        self.obj_geoms = {self.m.geom(n).id for n in loose}
         self.events = []                  # (time, step, message): collisions and IK problems
         self._seen = set()
         self.verbose = verbose
@@ -255,8 +282,8 @@ class SimWorld:
             mine = g1 if other == g2 else g2
             if other in self.env_geoms:
                 what = mujoco.mj_id2name(self.m, mujoco.mjtObj.mjOBJ_GEOM, other) or "table"
-            elif other == self.ball_geom and mine not in self.pad_geoms:
-                what = "ball (not with the finger pads)"
+            elif other in self.obj_geoms and mine not in self.pad_geoms:
+                what = f"{self.m.geom(other).name} (not with the finger pads)"
             else:
                 continue
             link = mujoco.mj_id2name(self.m, mujoco.mjtObj.mjOBJ_BODY, self.m.geom_bodyid[mine])
@@ -266,6 +293,17 @@ class SimWorld:
                 self.events.append((round(self.d.time, 2), self.step_name, msg))
                 if self.verbose:
                     print(f"  [sim] {self.step_name}: {msg}")
+
+    def body_pos(self, name):
+        return self.d.xpos[self.m.body(name).id].copy()
+
+    def place(self, name, xyz, yaw=0.0):
+        """Teleport a free body (a person putting an object down) and let it come to rest."""
+        a = self.m.joint(self.m.body(name).jntadr[0]).qposadr[0]
+        v = self.m.joint(self.m.body(name).jntadr[0]).dofadr[0]
+        self.d.qpos[a:a + 7] = [*xyz, np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+        self.d.qvel[v:v + 6] = 0
+        mujoco.mj_forward(self.m, self.d)
 
     def ball_pos(self):
         return self.d.xpos[self.m.body("ball").id].copy()
