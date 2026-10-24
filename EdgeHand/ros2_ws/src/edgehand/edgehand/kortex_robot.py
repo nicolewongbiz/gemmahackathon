@@ -32,6 +32,14 @@ def too_low(p, R):
     return None
 
 
+def already_there(p0, R0, p1, R1, pos_tol=0.003, ang_tol_deg=1.0):
+    """Within 3 mm and 1 degree: Kortex has nothing to do (and may abort a zero-length reach)."""
+    if np.linalg.norm(np.asarray(p1, float) - np.asarray(p0, float)) > pos_tol:
+        return False
+    cos = (np.trace(np.asarray(R0).T @ np.asarray(R1)) - 1) / 2
+    return np.degrees(np.arccos(np.clip(cos, -1, 1))) < ang_tol_deg
+
+
 def free_waypoints(p0, p1, R1, lift=0.0):
     """Flange waypoints for a free move p0 -> p1: rise to max(z0, z1) + lift, translate there, descend. Orientation
     changes during the first leg. Legs shorter than 2 mm are dropped."""
@@ -77,7 +85,13 @@ class KortexRobot:
         self.base.SetServoingMode(mode)
         self._stopped = False
         self._lock = threading.Lock()
-        log(f"kortex: connected to {ip}, tool frame z {self.tool_z:.3f} m")
+        state = Base_pb2.ArmState.Name(self.base.GetArmState().active_state)
+        log(f"kortex: connected to {ip}, tool frame z {self.tool_z:.3f} m, arm state {state}")
+        if state != "ARMSTATE_SERVOING_READY":
+            log("kortex: WARNING the arm isn't SERVOING_READY (fault, E-stop pressed, or another controller): "
+                "clear it in the Web App before moving")
+        p, R = self.flange()
+        log(f"kortex: flange now {np.round(p, 3).tolist()}, theta {np.round(kortex_theta(R), 1).tolist()}")
 
     # ---- the Kortex calls, kept small so tests can replace them ----
     def _reach(self, p_flange, R, speed_mps):
@@ -96,10 +110,13 @@ class KortexRobot:
         s.translation = float(min(speed_mps, 0.1))
         s.orientation = float(config.KORTEX_ANGULAR_SPEED_DPS)
         done, result = threading.Event(), {}
+        self.log(f"kortex: reach tool ({t.x:.3f}, {t.y:.3f}, {t.z:.3f}) theta ({t.theta_x:.1f}, {t.theta_y:.1f}, "
+                 f"{t.theta_z:.1f}) at {s.translation:.3f} m/s")
 
         def cb(n):
             if n.action_event in (B.ACTION_END, B.ACTION_ABORT):
                 result["event"] = n.action_event
+                result["why"] = str(getattr(n, "abort_details", "")).strip()
                 done.set()
         h = self.base.OnNotificationActionTopic(cb, B.NotificationOptions())
         try:
@@ -112,7 +129,10 @@ class KortexRobot:
         finally:
             self.base.Unsubscribe(h)
         if result.get("event") != B.ACTION_END:
-            self.log("kortex: move aborted" + (" (stop)" if self._stopped else " (unreachable pose or fault)"))
+            why = "stop" if self._stopped else (result.get("why") or "no details: unreachable pose, fault, or a "
+                                                 "zero-length move")
+            self.log(f"kortex: move aborted ({why}); arm state "
+                     f"{B.ArmState.Name(self.base.GetArmState().active_state)}")
             return False
         return True
 
@@ -127,7 +147,10 @@ class KortexRobot:
 
     # ---- the Robot interface ----
     def move_free(self, p, R):
-        p0, _ = self.flange()
+        p0, R0 = self.flange()
+        if already_there(p0, R0, p, R):
+            self.log("kortex: already at the target")
+            return False if too_low(p, R) else True
         for wp in free_waypoints(p0, p, R):
             if not self._reach(wp, R, config.KORTEX_LINEAR_SPEED_MPS):
                 return False

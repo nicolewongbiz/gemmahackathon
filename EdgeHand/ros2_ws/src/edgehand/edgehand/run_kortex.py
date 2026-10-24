@@ -6,6 +6,7 @@ Runs on the computer the camera is cabled to (this Mac). Red E-stop in hand; Mov
     python -m edgehand.run_kortex --tool torx           one request, no intent model
     python -m edgehand.run_kortex --look-only           move to the look pose, show what vision sees, no pick
     python -m edgehand.run_kortex --namer colour        name tools by handle colour instead of Gemma
+    python -m edgehand.run_kortex --namer first --tool x  ONE tool on the tray: whatever is found is the requested one
 
 Refuses to pick on config.py's placeholder calibration: run measure_tags first (data/calibration.json).
 """
@@ -36,7 +37,8 @@ def calibration_gate(allow_defaults):
         zs = {i: round(table_z(*config.TABLE_TAGS[i]), 4) for i in config.TABLE_TOUCH_Z}   # raises if implausible
         print(f"table height at the tags (m): {zs}")
     print(f"clearance {config.TABLE_CLEARANCE_M * 1000:.0f} mm, fingertips {config.FINGERTIP_CLOSED_M:.3f} m, "
-          f"air gap {config.AIR_GAP_M * 1000:.0f} mm, empty-gripper threshold {config.GRIPPER_EMPTY_POS}")
+          f"air gap {config.AIR_GAP_M * 1000:.0f} mm, empty-gripper threshold {config.GRIPPER_EMPTY_POS}, "
+          f"segmentation {config.SEGMENTATION}")
 
 
 class Eyes:
@@ -46,6 +48,7 @@ class Eyes:
         self.cam = StreamCamera(on_frame=self._count)
         self.tm = TableMap()
         self.namer = namer
+        self.want = None                       # the requested class, for --namer first
         self.last = None
 
     def _count(self, f):
@@ -64,7 +67,12 @@ class Eyes:
         if f is None or not self.tm.update(f):
             print("NOT CALIBRATED:", getattr(self.tm, "why_not", lambda: "tags not found")())
             return None
-        if self.namer is None:
+        if self.namer == "first":
+            tools = [dict(t, tool=self.want or "?") for t in find_tools(f, self.tm)]
+            if len(tools) > 1:
+                print(f"--namer first: {len(tools)} tools found, taking the biggest; put ONE tool on the tray")
+                tools = tools[:1]
+        elif self.namer is None:
             tools = detect_tools(f, self.tm)
         else:
             found = find_tools(f, self.tm)
@@ -84,7 +92,7 @@ def main():
     ap.add_argument("--air", action="store_true", help="AIR_GAP_M = 0.03: every grasp 3 cm above the tools")
     ap.add_argument("--tool", help="one request for this tool class, no intent model")
     ap.add_argument("--look-only", action="store_true")
-    ap.add_argument("--namer", choices=["gemma", "colour"], default=config.VISION_NAMER)
+    ap.add_argument("--namer", choices=["gemma", "colour", "first"], default=config.VISION_NAMER)
     ap.add_argument("--show", action="store_true", help="window with the detections")
     ap.add_argument("--allow-defaults", action="store_true")
     ap.add_argument("--robot", choices=["kortex", "none"], default="kortex", help="none = vision only")
@@ -93,14 +101,14 @@ def main():
         config.AIR_GAP_M = 0.03
     calibration_gate(a.allow_defaults)
 
-    namer = None
+    namer = "first" if a.namer == "first" else None
     if a.namer == "gemma":
         from edgehand.namer import GemmaNamer
         namer = GemmaNamer()
     intent = None
     if not a.tool and not a.look_only:
         from edgehand.intent import GemmaIntent
-        intent = GemmaIntent() if namer is None else _share_engine(namer)
+        intent = GemmaIntent() if isinstance(namer, (str, type(None))) else _share_engine(namer)
     eyes = Eyes(namer)
 
     robot = None
@@ -111,6 +119,7 @@ def main():
 
     def relocate(tool):
         time.sleep(config.LOOK_SETTLE_S)
+        eyes.want = tool
         tools = eyes.see(a.show) or []
         hit = [t for t in tools if t["tool"] == tool]
         return (hit[0]["grasp_xy"], hit[0]["handle_dir"]) if hit else None

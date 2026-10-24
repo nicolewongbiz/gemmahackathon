@@ -94,7 +94,8 @@ def test_detect_two_tools():
     assert sorted(t["tool"] for t in detect_tools(img, tm)) == ["flathead", "phillips"]
 
 
-def test_touching_tools_of_different_colours_stay_separate():
+def test_touching_tools_of_different_colours_stay_separate(monkeypatch):
+    monkeypatch.setattr(config, "SEGMENTATION", "colour")       # contrast can't split touching blobs
     # handles side by side, touching (2.4 cm wide each, 2.4 cm apart); stacked tools aren't supported
     img = synthetic.frame([("flathead", (0.45, 0.05), (1, 0)), ("torx", (0.45, 0.074), (1, 0))])
     tm = TableMap()

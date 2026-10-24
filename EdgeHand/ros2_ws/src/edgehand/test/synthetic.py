@@ -20,11 +20,13 @@ def to_px(Hc, x, y):
     return p[:2] / p[2]
 
 
-def frame(tools, tag_xy=None, tag_yaw=0.0):
+def frame(tools, tag_xy=None, tag_yaw=0.0, mat=25, extra=()):
     """tools: list of (name, grasp_xy, handle_dir). tag_yaw: radians each tag is turned on the table, taped down
-    crooked. Returns BGR image."""
+    crooked. mat: the mat's grey level (25 = dark, 235 = white paper). extra: [(table polygon, BGR)] painted last,
+    e.g. the gripper fingers at the frame's edge. Returns BGR image."""
     Hc = camera_H()
-    img = np.full((H, W, 3), 25, np.uint8)
+    px = lambda p: tuple(int(round(v)) for v in to_px(Hc, *p))
+    img = np.full((H, W, 3), mat, np.uint8)
     half = config.TAG_SIZE_M / 2
     c, s = np.cos(tag_yaw), np.sin(tag_yaw)
     for tid, (x, y) in (tag_xy or config.TABLE_TAGS).items():
@@ -43,9 +45,10 @@ def frame(tools, tag_xy=None, tag_yaw=0.0):
         ferrule = g + d * config.GRASP_FROM_FERRULE_M
         tip = ferrule - d * 0.10                                   # 10 cm shaft
         handle_end = ferrule + d * 0.10                            # 10 cm handle
-        px = lambda p: tuple(int(round(v)) for v in to_px(Hc, *p))
         cv2.line(img, px(tip), px(ferrule), (185, 185, 190), 8)                     # grey metal shaft
         n = np.array([-d[1], d[0]]) * 0.012                         # 2.4 cm wide handle, flat ends
         poly = np.array([px(ferrule + n), px(handle_end + n), px(handle_end - n), px(ferrule - n)], np.int32)
         cv2.fillConvexPoly(img, poly, COLOURS[name])
+    for poly_xy, colour in extra:
+        cv2.fillConvexPoly(img, np.array([px(p) for p in poly_xy], np.int32), colour)
     return img

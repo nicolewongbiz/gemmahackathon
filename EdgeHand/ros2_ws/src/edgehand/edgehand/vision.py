@@ -2,9 +2,15 @@
 
 Calibration: AprilTags (tag36h11) at measured base-frame positions -> pixel->table homography (TableMap: any 2 of the
 4 tags will do, and the last good fit covers frames where they're hidden).
-Detection: tools on a dark mat. A colourful grip with a grey, unsaturated part sticking out of one end = a tool; the
-grey part is the shaft. Naming is separate: by handle colour (config.TOOLS) or by Gemma (namer.py). The grasp point is on the SHAFT, GRASP_FROM_FERRULE_M from the handle, so the robot can
-present the handle to the operator.
+Detection, config.SEGMENTATION:
+  "contrast" (default): anything that differs from the mat, seen top-down through the homography, is an object; its
+      width profile along its long axis says which end is the handle (wide) and where the shaft starts (narrow).
+      Works for black, clear and coloured handles alike; needs a plain mat that contrasts with the tools (white paper
+      under dark precision screwdrivers; the black breadboard hid their dark handles).
+  "colour": a colourful grip with a grey, unsaturated part sticking out of one end = a tool; the grey part is the
+      shaft. The original method, for coloured handles on a dark mat.
+Naming is separate: by handle colour (config.TOOLS) or by Gemma (namer.py). The grasp point is on the SHAFT,
+GRASP_FROM_FERRULE_M from the handle, so the robot can present the handle to the operator.
 """
 import cv2
 import numpy as np
@@ -150,6 +156,16 @@ def _mask(hsv, ranges):
 
 
 def find_tools(frame, tmap):
+    """Every tool on the mat, unnamed, biggest first (config.SEGMENTATION picks the method). Each is
+    {"grasp_xy", "handle_dir", "grasp_px", "handle_px", "area", "contour", "colour"} (+ "width_m", "length_m" from
+    the contrast method); handle_dir is a unit vector (table frame) from the grasp point towards the grip, "colour" is
+    the TOOLS class whose HSV range covers the grip (or None). Names come from colour_class or namer.GemmaNamer."""
+    if config.SEGMENTATION == "colour":
+        return find_tools_colour(frame, tmap)
+    return find_tools_contrast(frame, tmap)
+
+
+def find_tools_colour(frame, tmap):
     """Every tool on the mat, unnamed: a colourful grip with a metal end. Biggest first. Each is
     {"grasp_xy", "handle_dir", "grasp_px", "handle_px", "area", "contour", "colour"}; handle_dir is a unit vector
     (table frame) from the grasp point towards the grip, "colour" is the TOOLS class whose HSV range covers the grip
@@ -189,6 +205,122 @@ def find_tools(frame, tmap):
             continue                                              # desk clutter beyond the tags (cables, etc.)
         out.append({"grasp_xy": grasp, "handle_dir": d, "grasp_px": tmap.table_to_px(*grasp), "handle_px": centre,
                     "area": area, "contour": c, "colour": colour_class(hsv, c)})
+    return sorted(out, key=lambda t: -t["area"])
+
+
+def tray_bounds(margin=None):
+    """(lo, hi) table corners of the tag rectangle plus a margin (TRAY_MARGIN_M by default)."""
+    xs, ys = zip(*config.TABLE_TAGS.values())
+    m = config.TRAY_MARGIN_M if margin is None else margin
+    return np.array([min(xs) - m, min(ys) - m]), np.array([max(xs) + m, max(ys) + m])
+
+
+def top_down(frame, tmap):
+    """The tray seen from straight above, WARP_MARGIN_M beyond the tags so overhanging handles stay whole: (image, T)
+    with T mapping table (x, y) -> warped pixel (u, v) at WARP_PX_PER_M. Row = x (arm forward = up), column = y
+    mirrored so the picture isn't flipped. Parts outside the camera's view come out black."""
+    lo, hi = tray_bounds(config.WARP_MARGIN_M)
+    k = config.WARP_PX_PER_M
+    wpx, hpx = int(np.ceil((hi[1] - lo[1]) * k)), int(np.ceil((hi[0] - lo[0]) * k))
+    # table -> warped: u = (hi_y - y) k, v = (hi_x - x) k
+    T = np.array([[0, -k, hi[1] * k], [-k, 0, hi[0] * k], [0, 0, 1.0]])
+    M = T @ tmap.H                                               # pixel -> table -> warped
+    return cv2.warpPerspective(frame, M, (wpx, hpx), flags=cv2.INTER_LINEAR), T
+
+
+def _width_profile(mask_pts, centre, axis, n=40):
+    """(stations along the axis from one end to the other, width at each) in the mask's units."""
+    rel = mask_pts - centre
+    along, across = rel @ axis, rel @ np.array([-axis[1], axis[0]])
+    edges = np.linspace(along.min(), along.max(), n + 1)
+    idx = np.clip(np.searchsorted(edges, along, side="right") - 1, 0, n - 1)
+    width = np.zeros(n)
+    for i in range(n):
+        a = across[idx == i]
+        if len(a):
+            width[i] = a.max() - a.min()
+    return (edges[:-1] + edges[1:]) / 2, width
+
+
+def find_tools_contrast(frame, tmap):
+    """Objects that differ from the mat, split into handle and shaft by their width profile. See the module doc."""
+    if tmap.H is None:
+        return []
+    img, T = top_down(frame, tmap)
+    k = config.WARP_PX_PER_M
+    Hinv = np.linalg.inv(tmap.H)
+    # the mat: the median colour inside the tag rectangle, with the tags (and their paper) cut out
+    tagm = cv2.warpPerspective(tmap.tag_mask(frame.shape), T @ tmap.H, (img.shape[1], img.shape[0]))
+    tagm = cv2.dilate(tagm, np.ones((int(0.03 * k) | 1,) * 2, np.uint8))
+    lo, hi = tray_bounds(0.0)
+    inner = np.zeros(tagm.shape, np.uint8)
+    (u0, v0), (u1, v1) = (T @ [lo[0], hi[1], 1])[:2], (T @ [hi[0], lo[1], 1])[:2]   # table corners -> warped
+    inner[int(min(v0, v1)):int(max(v0, v1)), int(min(u0, u1)):int(max(u0, u1))] = 255
+    bg = np.median(img[(tagm == 0) & (inner > 0)].reshape(-1, 3), axis=0)
+    diff = np.abs(img.astype(np.int16) - bg.astype(np.int16)).max(axis=2)
+    mask = ((diff > config.CONTRAST_MIN) & (tagm == 0)).astype(np.uint8) * 255
+    k3 = max(3, int(0.0015 * k)) | 1
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((k3, k3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((k3 + 2, k3 + 2), np.uint8))
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    out = []
+    for c in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]:
+        area_m2 = cv2.contourArea(c) / k / k
+        if area_m2 < config.TOOL_MIN_AREA_M2:
+            continue
+        x, y, w, h = cv2.boundingRect(c)
+        if x <= 1 or y <= 1 or x + w >= img.shape[1] - 1 or y + h >= img.shape[0] - 1:
+            continue                                              # touches the edge: the gripper, or something coming in
+        filled = np.zeros(mask.shape, np.uint8)
+        cv2.drawContours(filled, [c], -1, 255, -1)
+        pts = np.argwhere(filled > 0)[:, ::-1].astype(float)       # (u, v)
+        centre = pts.mean(axis=0)
+        axis = np.linalg.svd(pts - centre, full_matrices=False)[2][0]
+        stations, width = _width_profile(pts, centre, axis, n=60)
+        length = stations[-1] - stations[0] + (stations[1] - stations[0])
+        n = len(width)
+        ends = width[: n // 3].mean(), width[-(n // 3):].mean()
+        if ends[0] < ends[1]:                                     # make the handle the first end
+            axis, stations, width = -axis, -stations[::-1], width[::-1]
+            ends = ends[::-1]
+        handle_w = np.percentile(width[: n // 2][width[: n // 2] > 0], 80) if np.any(width[: n // 2] > 0) else 0
+        shaft_w = np.percentile(width[n // 2:][width[n // 2:] > 0], 20) if np.any(width[n // 2:] > 0) else 0
+        if handle_w <= 0 or length / handle_w < config.MIN_ELONGATION or shaft_w > 0.6 * handle_w:
+            continue                                              # a blob that isn't a handle with a shaft
+        thr = (handle_w + shaft_w) / 2
+        narrow = width < thr
+        ferrule_i = None
+        for i in range(n - 2):
+            if narrow[i] and narrow[i + 1] and narrow[i + 2]:
+                ferrule_i = i
+                break
+        if ferrule_i is None:
+            continue
+        # where the width crosses thr, interpolated between the last wide station and the first narrow one
+        s_f = stations[ferrule_i]
+        if ferrule_i > 0 and width[ferrule_i - 1] > width[ferrule_i]:
+            frac = (width[ferrule_i - 1] - thr) / (width[ferrule_i - 1] - width[ferrule_i])
+            s_f = stations[ferrule_i - 1] + frac * (stations[ferrule_i] - stations[ferrule_i - 1])
+        shaft_len = (stations[-1] - s_f) / k
+        if shaft_len < config.GRASP_FROM_FERRULE_M + config.MIN_SHAFT_BEYOND_GRASP_M:
+            continue                                              # no room on the shaft for the fingers
+        # warped (u, v) -> table (x, y): invert T
+        Tinv = np.linalg.inv(T)
+        to_table = lambda uv: (Tinv @ np.array([uv[0], uv[1], 1.0]))[:2]
+        ferrule_uv = centre + axis * s_f
+        handle_uv = centre + axis * stations[: max(ferrule_i, 1)].mean()
+        ferrule, handle = to_table(ferrule_uv), to_table(handle_uv)
+        d = handle - ferrule
+        d /= np.linalg.norm(d)
+        grasp = ferrule - d * config.GRASP_FROM_FERRULE_M
+        if not on_tray(grasp):
+            continue
+        # the outline back in camera pixels, for colour_class, the namer's marks and draw()
+        cam = cv2.perspectiveTransform(c.reshape(-1, 1, 2).astype(np.float32), Hinv @ Tinv).astype(np.int32)
+        out.append({"grasp_xy": grasp, "handle_dir": d, "grasp_px": tmap.table_to_px(*grasp),
+                    "handle_px": tmap.table_to_px(*handle), "area": cv2.contourArea(cam), "contour": cam,
+                    "colour": colour_class(hsv, cam), "width_m": handle_w / k, "length_m": length / k,
+                    "shaft_w_m": shaft_w / k})
     return sorted(out, key=lambda t: -t["area"])
 
 

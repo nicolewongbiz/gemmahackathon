@@ -71,6 +71,16 @@ SHAFT_MIN_VAL = 140                # shaft = bright (HSV V) and unsaturated; a l
 TOOL_MIN_AREA_PX = 800             # smaller blobs are noise
 SHAFT_MAX_SAT = 70                 # shaft = low saturation (metal); handle = its TOOLS colour
 GRIP_MIN_SAT, GRIP_MIN_VAL = 90, 60    # find_tools: any colourful grip (black grips vanish on a dark mat)
+# ---- Segmentation (vision.py): "contrast" = anything unlike the mat, handle/shaft from the width profile (any handle
+# colour; needs a plain mat the tools stand out from, e.g. white paper under dark screwdrivers). "colour" = the
+# original colourful-grip + grey-shaft method for coloured handles on a dark mat.
+SEGMENTATION = "contrast"
+CONTRAST_MIN = 45                  # max |BGR - mat| (0-255) for a pixel to count as an object; shadows stay below
+WARP_PX_PER_M = 2000               # the top-down view's scale: 2 px per mm
+WARP_MARGIN_M = 0.08               # the top-down view reaches this far past the tags (handles overhang them)
+TOOL_MIN_AREA_M2 = 3e-4            # 3 cm^2; a precision screwdriver is ~10
+MIN_ELONGATION = 2.5               # blob length / handle width; rounder blobs aren't tools
+MIN_SHAFT_BEYOND_GRASP_M = 0.015   # shaft needed past the grasp point so the fingers have something to close on
 # Who names each found tool: "gemma" (numbered marks + TOOL_DESCRIPTIONS) or "colour" (TOOLS HSV ranges)
 VISION_NAMER = "gemma"
 VISION_GEMMA_MODEL = os.environ.get("EDGEHAND_VISION_MODEL", GEMMA_MODEL)   # E4B .litertlm (vision encoder)

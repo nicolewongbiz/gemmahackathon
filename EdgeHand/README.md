@@ -248,7 +248,10 @@ Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
 | `FINGERS_ALONG` | "x" | flange axis the fingers close along (Phase 1.6) |
 | `TRAY_KEEPOUT_H` | 0.06 | height of the planning-scene box over the tool tray |
 | `SHAFT_MIN_VAL`, `SHAFT_MAX_SAT` | 140, 70 | HSV: a shaft is bright and unsaturated; a lit dark mat must stay below `SHAFT_MIN_VAL` |
-| `GRIP_MIN_SAT`, `GRIP_MIN_VAL` | 90, 60 | HSV: what counts as a colourful grip |
+| `SEGMENTATION` | "contrast" | "contrast": anything unlike the mat, handle = the wide end (any colour; needs a plain mat the tools stand out from). "colour": colourful grip + grey shaft on a dark mat |
+| `CONTRAST_MIN`, `WARP_MARGIN_M` | 45, 0.08 | how unlike the mat a pixel must be; how far past the tags the top-down view reaches (handles overhang) |
+| `TOOL_MIN_AREA_M2`, `MIN_ELONGATION`, `MIN_SHAFT_BEYOND_GRASP_M` | 3 cm², 2.5, 0.015 | what counts as a tool: size, long and thin, room on the shaft for the fingers |
+| `GRIP_MIN_SAT`, `GRIP_MIN_VAL` | 90, 60 | HSV: what counts as a colourful grip (`"colour"` only) |
 | `HOVER_M` | 0.12 | approach height above the grasp |
 | `HANDOVER_XYZ`, `OPERATOR_DIR` | (0.45, 0.30, 0.35), (0, 1, 0) | where the tool is presented and which way the handle points |
 | `TUG_TORQUE_NM`, `TUG_SAMPLES` | 1.5, 5 | release threshold on wrist-joint Δτ (measured noise ~0.01 N·m) |
@@ -312,7 +315,7 @@ In the multi-tool sim the remaining misses are all in intent, for the sim-only p
 | `ping 192.168.1.10` fails | Cable into the arm's base RJ45, link light on, static 192.168.1.11 on that adapter (Phase 1.1), Wi-Fi off if it uses 192.168.1.x |
 | `vision_node` / `edgehand.camera`: no frames | Wrong `CAMERA_USB_INDEX` (`--list`), USB 2 or charge-only cable, another app holding the camera. On a Mac, allow camera access for the terminal |
 | NOT CALIBRATED at the look pose | All 4 tags in view and not hidden by the fingers (Phase 1.5), lighting, print size 5 cm |
-| Tool not found | Grip not colourful enough on the mat (`GRIP_MIN_SAT`), shaft too dark (`SHAFT_MIN_VAL`), tools touching end to end or stacked. Check with `show:=true` |
+| Tool not found | **The mat.** Dark handles (black, dark green, clear) on the black breadboard are invisible: put white paper under the whole tag rectangle. With `SEGMENTATION = "contrast"` anything unlike the mat is a candidate, so the tool must lie entirely on the paper, not touching another tool or a tag, and not touching the frame's edge (the gripper fingers are in every frame there). Shadows under `CONTRAST_MIN`. With `"colour"`: `GRIP_MIN_SAT`, `SHAFT_MIN_VAL`. Check with `run_kortex --look-only --show` or `show:=true` |
 | Tool found but named wrong | Make `TOOL_DESCRIPTIONS` say what's visible from above (handle colours and shape). Or `namer:=colour` with tuned `TOOLS` HSV ranges |
 | Gemma calls time out | Another process is using the GPU (a second Gemma, a sim); LiteRT gives up after 2 min. Run one at a time |
 | Two drivers / controller_manager errors | Only the MoveIt launch should run; kill any `kortex_bringup` launch |
