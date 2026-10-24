@@ -75,10 +75,49 @@ class Handover:
                                  f"(minimum {config.TABLE_CLEARANCE_M * 1000:.1f} mm)")
         return t
 
+    def holding_something(self):
+        """True when the fingers are closed on something (a tool left from an interrupted handover)."""
+        if not self.check_grasp:
+            return False
+        f = getattr(self.robot, "grip_position", None)
+        pos = f() if f else None
+        return pos is not None and config.GRIPPER_HOLDING_MIN < pos < config.GRIPPER_EMPTY_POS
+
+    def hand_over_whats_held(self):
+        """Finish an interrupted handover: carry whatever is in the gripper to the operator, wait for the tug (or
+        RELEASE), open, retreat, back to the look pose. Returns (ok, message). Never opens the gripper in the air."""
+        self.stop_flag.clear()
+        self.release_flag.clear()
+        r = self.robot
+        give = np.array(config.HANDOVER_XYZ, float)
+        back = give - np.array([*config.OPERATOR_DIR[:2], 0.0]) * 0.10
+        R = handover_R()
+        try:
+            self.log("holding something from before: handing it over first")
+            self.state("presenting")
+            self._step("to handover", r.move_free(flange_from_tcp(give, R), R))
+            self._wait_for_tug()
+            self._step("release", r.gripper(config.GRIPPER_OPEN))
+            self.state("retreating")
+            self._step("retreat", r.move_line(flange_from_tcp(back, R), R))
+            self._step("look", r.look())
+            self.state("idle")
+            return True, "handed over what was held"
+        except Stopped as e:
+            self.state("stopped")
+            return False, f"stopped during {e}"
+        except (RuntimeError, ValueError) as e:
+            self.state("error")
+            return False, str(e)
+
     def run(self, grasp_xy, handle_dir, relocate=None):
         """Pick the tool at grasp_xy and hand it over. After a missed grasp the arm goes back to the look pose and
         relocate() -> (grasp_xy, handle_dir) or None says where the tool is now (relocate=None: no retries).
-        Returns (ok, message)."""
+        A tool still in the gripper from an interrupted handover is handed over first. Returns (ok, message)."""
+        if self.holding_something():
+            ok, msg = self.hand_over_whats_held()
+            if not ok:
+                return ok, msg
         self.stop_flag.clear()
         self.release_flag.clear()
         r = self.robot

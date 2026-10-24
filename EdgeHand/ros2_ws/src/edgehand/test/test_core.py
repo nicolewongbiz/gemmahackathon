@@ -378,3 +378,27 @@ def test_pick_yaw_takes_the_smaller_turn_and_flips_the_handover():
     t0 = h.plan_targets((0.30, -0.05), d)
     along0 = t0["give"][1][:, 1] if config.FINGERS_ALONG == "x" else t0["give"][1][:, 0]
     assert along0[:2] @ np.array(config.OPERATOR_DIR[:2]) > 0.99
+
+
+# ---- a tool left in the gripper ----
+def test_held_tool_is_handed_over_before_the_next_pick():
+    r = FakeRobot()
+    r.grip_pos = 0.6                                                     # closed on something, not empty
+    h = Handover(r, log=lambda *a: None)
+    assert h.holding_something()
+    orig = r.wait
+    r.wait = lambda s: (orig(s), h.release() if h.holding else None)     # the operator takes each tool at once
+    ok, msg = h.run((0.45, 0.0), (0, 1))
+    assert ok, msg
+    # first the leftover handover (to handover, release, retreat, look), then the normal pick sequence
+    assert r.calls[:4] == ["free", f"grip{config.GRIPPER_OPEN}", "line", "look"]
+    assert r.calls[4:4 + len(PICK)] == PICK
+
+
+def test_open_or_empty_gripper_is_not_holding():
+    r = FakeRobot()
+    h = Handover(r, log=lambda *a: None)
+    r.grip_pos = 0.0
+    assert not h.holding_something()
+    r.grip_pos = 0.79
+    assert not h.holding_something()

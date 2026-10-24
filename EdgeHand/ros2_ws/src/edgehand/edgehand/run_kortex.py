@@ -287,6 +287,12 @@ def main():
 
     try:
         if robot:
+            if h and h.holding_something():
+                print("the gripper is holding something from before: handing it over first (pull it, or say release)")
+                ok, msg = h.hand_over_whats_held()
+                print("handover:", "OK" if ok else "FAILED", msg)
+                if not ok:
+                    return
             print("moving to the look pose")
             if not robot.look():
                 print("can't reach the look pose; stopping")

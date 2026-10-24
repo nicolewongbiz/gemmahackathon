@@ -392,6 +392,7 @@ In the multi-tool sim the remaining misses are all in intent, for the sim-only p
 | Arm grips air / hits the tray | `FINGERTIP_CLOSED_M` and `TABLE_TOUCH_Z` (Phase 1.6); do an air run (Phase 3.3) |
 | "… puts the fingertips … mm above the table" | A target was refused for being too low: check `TABLE_TOUCH_Z`, `TOOL_RADIUS_M`, and that `TCP_OFFSET_M` wasn't overridden |
 | "missed the tool" every time | `GRIPPER_EMPTY_POS` too low, or `GRIPPER_JOINT` not in `/joint_states` (Phase 1.6) |
+| A tool is still in the gripper after a failed run | Nothing to do: at startup, and before any new request, the runner sees the fingers closed on something (`GRIPPER_HOLDING_MIN` < position < `GRIPPER_EMPTY_POS`), carries it to the handover point and waits for the tug (or RELEASE / a spoken "release") before carrying on. It never opens the gripper in the air |
 | Releases on its own | Raise `TUG_TORQUE_NM`, or wait longer before the baseline is taken (`SETTLE_S`) |
 | Never releases on a tug | Lower `TUG_TORQUE_NM`; check `/joint_states` efforts aren't zero (they are with fake hardware) |
 | Arm stops by itself | Pi watchdog: is `edgehand_pi.py` running, and is `pi_bridge` getting heartbeats? |

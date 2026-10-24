@@ -138,6 +138,7 @@ GRIPPER_MAX_EFFORT = 50.0
 # 0.782 on nothing. MEASURE (Phase 1.6): close on nothing and on the thinnest shaft, set this between the two.
 GRIPPER_JOINT = "robotiq_85_left_knuckle_joint"    # in /joint_states (VERIFY the name on the real driver)
 GRIPPER_EMPTY_POS = 0.765
+GRIPPER_HOLDING_MIN = 0.15         # fingers closed past this but short of GRIPPER_EMPTY_POS = something is in the hand
 PICK_ATTEMPTS = 3                  # a miss -> back to the look pose, look again, pick again
 HANDOVER_XYZ = (0.45, 0.30, 0.35)  # where the tool is presented (operator's chest height, not face)
 OPERATOR_DIR = (0.0, 1.0, 0.0)     # unit vector, base frame: the handle points this way
