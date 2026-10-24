@@ -44,10 +44,10 @@ applied: {clip}; your own read of the phase: {phase_read}.
 Choose the ONE instrument from the tray the surgeon most likely needs next.
 Reply ONLY with JSON: {{"colour": "<{colours}>", "reason": "<at most 12 words>"}}"""
 
-VOICE = """Surgical phase now: {phase}. The surgeon just spoke (audio).
-Map it to ONE intent: request (an instrument, by colour, name or the job it does), stop, release (let go / got it),
-or none. Reply ONLY with JSON: {{"intent": "<request|stop|release|none>", "colour": "<{colours} or null>",
-"heard": "<their words>", "reason": "<at most 8 words>"}}"""
+VOICE = """Surgical phase now: {phase}. The surgeon said: "{heard}"
+If they asked for an instrument (by colour, name or the job it does), intent is request and colour is that
+instrument's colour; otherwise intent is none. Reply ONLY with JSON:
+{{"intent": "<request|none>", "colour": "<{colours} or null>", "reason": "<at most 8 words>"}}"""
 
 
 def by_colour():
@@ -194,10 +194,17 @@ class Assistant:
                 wav = self.dir / "voice.wav"
                 self.status = f"listening for {config.VOICE_SECONDS:.0f} s..."
                 record(wav)
+                from edgehand.voice_node import rule_intent, transcribe
                 self.status = "Gemma is listening..."
-                d = gemma.ask_json(self.engine, self.system,
-                                   VOICE.format(phase=self.phase["phase"] or "unknown", colours=self.colours), audio=wav)
-                v = parse_voice(d)
+                heard = transcribe(self.engine, wav)        # neutral prompt: the phase can't bias what it hears
+                fixed = rule_intent(heard)                  # stop / release: fixed keywords, not Gemma's judgement
+                if fixed:
+                    v = {"intent": fixed, "tool": None, "colour": None, "heard": heard, "reason": "keyword"}
+                else:
+                    v = parse_voice(dict(gemma.ask_json(self.engine, self.system, VOICE.format(
+                        phase=self.phase["phase"] or "unknown", heard=heard, colours=self.colours)) or {}, heard=heard))
+                    if v["intent"] != "request":            # stop / release only ever come from the keywords
+                        v["intent"] = "none"
                 print(f"voice: heard {v['heard']!r} -> {v['intent']} {v['colour'] or ''}", flush=True)
                 if v["intent"] == "request":
                     self._request(v["tool"], "voice", reason=v["reason"])

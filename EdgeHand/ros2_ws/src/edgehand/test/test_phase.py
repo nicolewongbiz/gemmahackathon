@@ -135,3 +135,14 @@ def test_scene_parsing():
     assert s == {"visible": 2, "seen": "forceps, clip", "aneurysm": True, "clip": False, "phase_read": "Clipping"}
     s = parse_scene({"aneurysm_visible": "maybe", "phase_read": "suturing"})
     assert s["aneurysm"] is None and s["phase_read"] is None and s["visible"] is None     # unknown -> None, not guessed
+
+
+def test_voice_keyword_rules_decide_stop_and_release():
+    from edgehand.voice_node import rule_intent
+    for said in ("Stop", "stop the arm", "wait!", "hold on", "freeze"):
+        assert rule_intent(said) == "stop", said
+    for said in ("got it", "Goded, you can let go", "release it", "I've got it", "you can let go now"):
+        assert rule_intent(said) == "release", said
+    for said in ("pass me the clip applier", "can you check the monitor", "I need suction here"):
+        assert rule_intent(said) is None, said
+    assert rule_intent("wait, let go") == "stop"                                # stop always wins

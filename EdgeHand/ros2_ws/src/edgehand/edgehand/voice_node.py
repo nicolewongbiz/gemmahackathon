@@ -5,8 +5,12 @@ edgehand/link.py. run_kortex --listen picks it up like any other node. Offline.
     python -m edgehand.voice_node --text             type instead of speaking (testing)
     python -m edgehand.voice_node --list-mics
 
-Gemma returns {"intent": "request" | "stop" | "release" | "none", "tool", "heard", "reply"}; the tool is whitelisted
-against config.TOOLS, and Gemma never produces coordinates. A spoken "stop" is a convenience: the red E-stop is the stop.
+Three steps, so what Gemma expects can't change what it hears:
+  1. transcribe (audio, neutral prompt: no instruments, no phase) -> the words;
+  2. stop / release by fixed keywords on those words (rule_intent), never by Gemma's judgement;
+  3. otherwise Gemma maps the words to {"intent": "request" | "none", "tool", "reply"}, tool whitelisted.
+With instruments and the phase in the same prompt as the audio, Gemma heard "stop" as "clip applier".
+Gemma never produces coordinates. A spoken "stop" is a convenience: the red E-stop is the stop.
 """
 import argparse, re, subprocess, tempfile
 from pathlib import Path
@@ -20,6 +24,27 @@ Map what the surgeon says to ONE intent:
   release  - let go, release, I've got it
   none     - anything else
 Reply ONLY with JSON: {{"intent": "...", "tool": "<tool or null>", "heard": "<their words>", "reply": "<very short spoken reply>"}}"""
+
+
+TRANSCRIBE_SYSTEM = "You transcribe short spoken sentences exactly, word for word."
+TRANSCRIBE = 'Transcribe exactly what the person in the audio said. Reply ONLY with JSON: {"heard": "<their exact words>"}'
+STOP_WORDS = r"\b(stop|wait|hold|freeze|halt|pause|abort)\b"
+RELEASE_WORDS = r"\b(let go|release|got it|i'?ve got it|drop it|open (the )?gripper|take it)\b"
+
+
+def transcribe(engine, wav):
+    d = gemma.ask_json(engine, TRANSCRIBE_SYSTEM, TRANSCRIBE, audio=wav) or {}
+    return str(d.get("heard", "")).strip()
+
+
+def rule_intent(text):
+    """'stop' / 'release' from fixed keywords (stop wins), else None: these never depend on a model's judgement."""
+    t = text.lower()
+    if re.search(STOP_WORDS, t):
+        return "stop"
+    if re.search(RELEASE_WORDS, t):
+        return "release"
+    return None
 
 
 def mics():
@@ -71,12 +96,15 @@ def main():
         while True:
             if a.text:
                 said = input("> ").strip()
-                d = gemma.ask_json(engine, system, said)
             else:
                 input("ENTER to talk...")
                 record(wav)
-                d = gemma.ask_json(engine, system, "What did the surgeon say? Map it to one intent.", audio=wav)
-            r = parse(d)
+                said = transcribe(engine, wav)
+            fixed = rule_intent(said)
+            r = ({"intent": fixed, "tool": None, "heard": said, "reply": "Stopping." if fixed == "stop" else "Releasing."}
+                 if fixed else parse(dict(gemma.ask_json(engine, system, f'The surgeon said: "{said}"') or {}, heard=said)))
+            if not fixed and r["intent"] != "request":       # stop / release only ever come from the keywords
+                r["intent"] = "none"
             print(f"  heard {r['heard']!r} -> {r['intent']}" + (f" {r['tool']}" if r["tool"] else ""))
             if r["intent"] == "request":
                 link.send({"type": "request", "tool": r["tool"], "source": "voice"}, a.host)
