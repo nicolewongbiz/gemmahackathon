@@ -183,6 +183,15 @@ Measured in MuJoCo (§6): the lowest gripper point is 0.7 mm below the nominal c
    - **Empty vs holding.** Close the gripper on nothing, then on the thinnest shaft you'll use, and read `GRIPPER_JOINT` each time (`ros2 topic echo /joint_states`). Check the joint name is there, and set `GRIPPER_EMPTY_POS` halfway between the two (sim: 0.782 empty, 0.745 on a 6 mm shaft).
    - Open and close the gripper in RViz with the `end_effector_link` axes shown: set `FINGERS_ALONG` to the flange axis ("x" or "y") the fingers move along.
 7. **Tool descriptions.** Write what each real tool looks like from above in `TOOL_DESCRIPTIONS`, e.g. "screwdriver with a red and black handle".
+8. **Shoot test frames** (no arm motion; the arm stays at the look pose). Run `python -m edgehand.label --capture --note "<scene>"`, press SPACE to save a frame, then label it: press the tool's class number, click its grasp point on the shaft, then click towards the handle. ENTER saves. Shoot each of these:
+   - room light
+   - side lamp
+   - flashlight glare on the mat
+   - two tools touching
+   - a non-tool in the tray
+   - the empty tray (press ENTER without labelling)
+
+   Frames go to `data/frames/` at 1280×720, JPEG quality 70, like the stream. `python -m pytest -s test/test_real_frames.py` then checks real tools and lighting without the arm: every labelled tool found, grasp within 10 mm, handle direction right, colour class and stray detections reported. Add `EDGEHAND_TEST_GEMMA=1` to check Gemma's names too. The labels are pixels, so re-measuring `TABLE_TAGS` doesn't invalidate them, but the frames only calibrate once `TABLE_TAGS` matches where the tags really are.
 
 ### Phase 2: Core loop
 - **Workstation:** `ros2 launch edgehand workstation.launch.py robot_ip:=192.168.1.10`. This starts the MoveIt launch plus `intent_node`, `vision_node`, `handover_node` and `pi_bridge`. Arguments: `camera:=usb|rtsp|topic`, `namer:=gemma|colour`, `show:=true` (vision window).
@@ -270,6 +279,7 @@ EdgeHand/
 | MuJoCo, first grasp aimed 12 cm past the tool (closes on air) | `... -m sim.handover --trials 10 --miss` | 10/10 seen as a miss, looked again, picked on the second try; never lower than 5.3 mm |
 | MuJoCo multi-tool trays with the table-safety changes, colour naming, intent stubbed | `-m sim.tools` trial() with a stub intent, 18 trays | 18/18 handed over, no contacts, never lower than 5.3 mm (hammer 6.3 mm, pliers / wrench 7.3 mm+) |
 | MuJoCo multi-tool trays, real Gemma 4 E4B for intent and naming: 4 tools per tray from 6 classes (adds sim-only pliers, wrench, hammer) | from `EdgeHand/`: `-m sim.tools` | Wrist camera + Gemma naming: **29/30 end to end (97%)**, tools found and named 120/120, grasp + handover 22/22, 0 collisions. Before, with the overhead camera and colour naming: 56/60 (93%). Phrase battery 55/59 (93%) |
+| Real camera frames, labelled (Phase 1.8) | `python -m pytest -s test/test_real_frames.py` | Checked on synthetic labelled frames: correct labels pass, a 3 cm label error fails (31 mm). The first real frame (empty tray, room light) fails calibration until `TABLE_TAGS` is measured, because the placeholder positions don't match the taped tags |
 | Real arm, read-only (no motion) | Kortex probe | see "Measured on the real arm" above |
 
 In the multi-tool sim the remaining misses are all in intent, for the sim-only pliers ("pass me the grips", "the side cutters", "I need to bend this wire" → null) plus "pry open this paint can lid" for the flathead. A worked example in the intent prompt would probably fix them. The sim tools are coloured shapes under even lighting, so naming real tools on a real camera will be harder than 120/120.
