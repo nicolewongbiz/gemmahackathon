@@ -7,7 +7,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from edgehand import config                                        # noqa: E402
-from edgehand.geometry import R_from_quat, flange_from_tcp, handover_R, quat_from_R, tool_down_R  # noqa: E402
+from edgehand.geometry import (R_from_quat, flange_from_tcp, handover_R, quat_from_R, table_clearance,  # noqa: E402
+                               table_z, tool_down_R)
 from edgehand.handover import Handover                             # noqa: E402
 from edgehand.intent import parse_reply                            # noqa: E402
 from edgehand.release import TugDetector                           # noqa: E402
@@ -136,16 +137,29 @@ def test_not_calibrated_without_all_tags():
 
 # ---- handover state machine ----
 class FakeRobot:
-    def __init__(self, tug_after=None, fail=None):
+    """grips: finger position after each close, in order (default: always holding a shaft)."""
+    def __init__(self, tug_after=None, fail=None, grips=()):
         self.calls, self.t, self.tug_after, self.fail = [], 0.0, tug_after, fail
+        self.grips, self.grip_pos, self.poses, self.slow = list(grips), 0.0, [], []    # slow: indices into poses
 
     def _do(self, name, *a):
         self.calls.append(name)
         return name != self.fail
 
-    def move_free(self, p, R): return self._do("free", p, R)
-    def move_line(self, p, R, collisions=True): return self._do("line", p, R)
-    def gripper(self, pos): return self._do(f"grip{pos}")
+    def move_free(self, p, R):
+        self.poses.append((p, R))
+        return self._do("free", p, R)
+
+    def move_line(self, p, R, collisions=True, scale=None):
+        self.poses.append((p, R))
+        self.slow.append(len(self.poses) - 1) if scale else None
+        return self._do("slow line" if scale else "line", p, R)
+
+    def gripper(self, pos):
+        self.grip_pos = (self.grips.pop(0) if self.grips else 0.7) if pos == config.GRIPPER_CLOSED else pos
+        return self._do(f"grip{pos}")
+
+    def grip_position(self): return self.grip_pos
     def look(self): return self._do("look")
     def cancel(self): self.calls.append("cancel")
 
@@ -161,8 +175,94 @@ def test_handover_sequence_with_tug():
     r = FakeRobot(tug_after=3.0)
     ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))
     assert ok, msg
-    assert r.calls == [f"grip{config.GRIPPER_OPEN}", "free", "line", f"grip{config.GRIPPER_CLOSED}", "line",
-                       "free", f"grip{config.GRIPPER_OPEN}", "line", "look"]
+    assert r.calls == PICK + ["free", f"grip{config.GRIPPER_OPEN}", "line", "look"]
+
+
+PICK = [f"grip{config.GRIPPER_OPEN}", "free", "line", "slow line", f"grip{config.GRIPPER_CLOSED}", "line"]
+
+
+# ---- never hit the table ----
+def test_every_pose_keeps_the_fingertips_above_the_table():
+    r = FakeRobot(tug_after=3.0)
+    assert Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))[0]
+    clear = [table_clearance(p, R) for p, R in r.poses]
+    assert min(clear) >= config.TABLE_CLEARANCE_M - 1e-9
+    assert np.isclose(min(clear), config.TABLE_CLEARANCE_M)                 # the grasp itself, nothing lower
+
+
+def test_last_bit_of_the_descent_is_slow():
+    r = FakeRobot(tug_after=3.0)
+    Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))
+    i = r.slow[0]
+    (p_fast, R), (p_slow, _) = r.poses[i - 1], r.poses[i]
+    assert np.isclose(table_clearance(p_fast, R) - table_clearance(p_slow, R), config.DESCEND_SLOW_M)
+
+
+def test_refuses_a_grasp_too_close_to_the_table(monkeypatch):
+    monkeypatch.setattr(config, "TCP_OFFSET_M", config.TCP_OFFSET_M - 0.01)    # e.g. a mis-measured offset
+    r = FakeRobot()
+    ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))
+    assert not ok and "above the table" in msg and r.calls == []           # refused before any motion
+
+
+def test_tilted_table_plane_from_fingertip_touches(monkeypatch):
+    d = config.FINGERTIP_CLOSED_M
+    # the table rises 6 mm from x 0.35 to x 0.60 (1.4 degrees), and sits 5 mm higher overall
+    touch = {i: 0.005 + d + 0.006 * (x - 0.35) / 0.25 for i, (x, y) in config.TABLE_TAGS.items()}
+    monkeypatch.setattr(config, "TABLE_TOUCH_Z", touch)
+    assert np.isclose(table_z(0.35, 0.1), 0.005) and np.isclose(table_z(0.60, -0.1), 0.011)
+    for x in (0.38, 0.57):
+        r = FakeRobot(tug_after=3.0)
+        assert Handover(r, log=lambda *a: None).run((x, 0.0), (0, 1))[0]
+        p, R = r.poses[r.slow[0]]
+        assert np.isclose(p[2] - d - table_z(x, 0.0), config.TABLE_CLEARANCE_M)   # follows the tilt
+
+
+def test_air_gap_raises_every_grasp_and_skips_the_grasp_check(monkeypatch):
+    monkeypatch.setattr(config, "AIR_GAP_M", 0.03)
+    r = FakeRobot(tug_after=3.0, grips=[0.79])                             # closes on air
+    assert Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))[0]
+    p, R = r.poses[r.slow[0]]
+    assert np.isclose(table_clearance(p, R), config.TABLE_CLEARANCE_M + 0.03)
+
+
+# ---- missed grasps ----
+def test_missed_grasp_looks_again_and_retries():
+    r = FakeRobot(tug_after=3.0, grips=[0.79])                             # first close: nothing between the fingers
+    seen = []
+    relocate = lambda: seen.append(r.calls[-1]) or ((0.47, 0.02), np.array([1.0, 0.0]))
+    ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1), relocate=relocate)
+    assert ok, msg
+    assert seen == ["look"]                                                # vision looks from the look pose
+    assert r.calls[:len(PICK) + 2] == PICK + [f"grip{config.GRIPPER_OPEN}", "look"]
+    assert r.calls[len(PICK) + 2:len(PICK) * 2 + 2] == PICK
+    p, R = r.poses[r.slow[1]]
+    assert np.allclose(p[:2], (0.47, 0.02))                                # second try goes where vision says now
+
+
+def test_gives_up_after_pick_attempts():
+    r = FakeRobot(grips=[0.79] * 10)
+    n = 0
+
+    def relocate():
+        nonlocal n
+        n += 1
+        return (0.45, 0.0), np.array([0.0, 1.0])
+    ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1), relocate=relocate)
+    assert not ok and f"{config.PICK_ATTEMPTS} times" in msg
+    assert n == config.PICK_ATTEMPTS - 1 and r.calls.count("slow line") == config.PICK_ATTEMPTS
+    assert r.calls[-2:] == [f"grip{config.GRIPPER_OPEN}", "look"] and r.calls.count("free") == config.PICK_ATTEMPTS
+
+
+def test_lost_tool_after_a_miss():
+    r = FakeRobot(grips=[0.79])
+    ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1), relocate=lambda: None)
+    assert not ok and "missed the tool 1 time" in msg and r.calls[-1] == "look"
+
+
+def test_fake_hardware_skips_the_grasp_check():
+    r = FakeRobot(tug_after=3.0, grips=[0.8])
+    assert Handover(r, log=lambda *a: None, check_grasp=False).run((0.45, 0.0), (0, 1))[0]
 
 
 def test_handover_release_button():

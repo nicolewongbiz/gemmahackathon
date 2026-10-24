@@ -3,6 +3,7 @@ Gen3 + Robotiq 2F-85, with a simulated operator pulling the handle.
 
     ../GemmaHackathon/sim/.venv/bin/python -m sim.handover              (from EdgeHand/)
     ... -m sim.handover --trials 10                                     random tool poses, success rate
+    ... -m sim.handover --trials 10 --miss                              first grasp aimed past the tip: look again, retry
 Needs the Menagerie models: bash ../GemmaHackathon/sim/get_assets.sh
 """
 import argparse, sys
@@ -109,6 +110,7 @@ class SimRobot:
         self.handle_towards_operator = None
         self.robot_bodies = {b for b in range(m.nbody) if self._under(b, m.body("shoulder_link").id)}
         self.events = set()
+        self.lowest = np.inf             # closest the gripper got to the table (m), checked every control step
         self.time_limit = 90.0
         self.video = video
         self.frames = []
@@ -134,6 +136,8 @@ class SimRobot:
                 self.d.xfrc_applied[tool, :3] = f         # operator pulls the handle towards themselves
             mujoco.mj_step(self.m, self.d)
             self._contacts()
+            if self.d.time % (DT * CTRL_EVERY) < DT:
+                self.lowest = min(self.lowest, self.gripper_bottom())
             if self.video and int(self.d.time * FPS) != int((self.d.time - DT) * FPS):
                 self._vr.update_scene(self.d, camera="side")
                 self.frames.append(self._vr.render()[:, :, ::-1].copy())
@@ -144,6 +148,22 @@ class SimRobot:
             for mine, other in ((b1, c.geom2), (b2, c.geom1)):
                 if mine in self.robot_bodies and self.m.geom(other).name == "table":
                     self.events.add(f"{self.m.body(mine).name} hit the table")
+
+    def gripper_bottom(self):
+        """Height of the lowest point of the gripper's geometry (meshes and boxes) above the table."""
+        m, d = self.m, self.d
+        if not hasattr(self, "_grip_geoms"):
+            self._grip_geoms = [g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith("g_")]
+        low = np.inf
+        for g in self._grip_geoms:
+            R, c = d.geom_xmat[g].reshape(3, 3), d.geom_xpos[g]
+            if m.geom_type[g] == mujoco.mjtGeom.mjGEOM_MESH:
+                i = m.geom_dataid[g]
+                v = m.mesh_vert[m.mesh_vertadr[i]:m.mesh_vertadr[i] + m.mesh_vertnum[i]]
+                low = min(low, float((v @ R[2] + c[2]).min()))
+            elif m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX:
+                low = min(low, float(c[2] - np.abs(R[2]) @ m.geom_size[g]))
+        return low - config.TABLE_Z
 
     # ---- kinematics ----
     def ik(self, p_t, R_t, q0, iters=100):
@@ -181,9 +201,10 @@ class SimRobot:
         self._track(q0 + (q1 - q0) * s for s in (0.5 - 0.5 * np.cos(np.pi * np.arange(1, n + 1) / n)))
         return True
 
-    def move_line(self, p, R, collisions=True):
+    def move_line(self, p, R, collisions=True, scale=None):
         p0 = self.d.site_xpos[self.flange].copy()
-        n = int(np.linalg.norm(np.asarray(p) - p0) / 0.05 / (DT * CTRL_EVERY)) + 1     # 5 cm/s
+        v = 0.05 * (scale or config.VEL_SCALE) / config.VEL_SCALE                     # 5 cm/s at VEL_SCALE
+        n = int(np.linalg.norm(np.asarray(p) - p0) / v / (DT * CTRL_EVERY)) + 1
         qs, q = [], self.q_cmd
         for i in range(1, n + 1):
             q, ep, er = self.ik(p0 + (np.asarray(p) - p0) * i / n, R, q, iters=50)
@@ -203,6 +224,10 @@ class SimRobot:
         self.wait(1.0)
         return True
 
+    def grip_position(self):
+        # the 2F-85 driver joint: 0 open ... ~0.8 closed, like the real gripper's position
+        return float(self.d.qpos[self.m.joint("g_right_driver_joint").qposadr[0]])
+
     def look(self):
         return self.move_free(*look_pose())
 
@@ -220,7 +245,7 @@ class SimRobot:
         return r.render()[:, :, ::-1].copy()
 
 
-def episode(rng, video=False, pull_delay=3.0, pull_n=12.0):
+def episode(rng, video=False, pull_delay=3.0, pull_n=12.0, miss=False):
     xs = [p[0] for p in config.TABLE_TAGS.values()]
     ys = [p[1] for p in config.TABLE_TAGS.values()]
     yaw = rng.uniform(-np.pi, np.pi)
@@ -240,7 +265,15 @@ def episode(rng, video=False, pull_delay=3.0, pull_n=12.0):
     truth = r.d.site_xpos[m.site("grasp").id][:2]
     err = float(np.linalg.norm(t["grasp_xy"] - truth))
     # ---- handover with the operator pulling once the arm is holding ----
+    def relocate():                      # back at the look pose after a miss: vision looks again
+        f = r.render("wrist")
+        found = detect_tools(f, tm) if tm.update(f) else []
+        return (found[0]["grasp_xy"], found[0]["handle_dir"]) if found else None
+    grasp = t["grasp_xy"] - t["handle_dir"] * (0.12 if miss else 0.0)    # --miss: past the tip, closes on air
     h = Handover(r, log=lambda *a: None)
+    tries = []
+    orig_pick = h._pick
+    h._pick = lambda targets: tries.append(1) or orig_pick(targets)
     orig_wait_for_tug = h._wait_for_tug
 
     def schedule_pull():
@@ -248,11 +281,12 @@ def episode(rng, video=False, pull_delay=3.0, pull_n=12.0):
         orig_wait_for_tug()
     h._wait_for_tug = schedule_pull
     try:
-        ok, msg = h.run(t["grasp_xy"], t["handle_dir"])
+        ok, msg = h.run(grasp, t["handle_dir"], relocate=relocate)
     except TimeoutError as e:
         ok, msg = False, f"{e} (state: holding, last delta torque {h.detector.last_delta:.2f} N*m)"
-    res = {"ok": ok and r.handle_towards_operator is True, "msg": msg, "vision_err_mm": err * 1000,
-           "handle_towards_operator": r.handle_towards_operator, "events": sorted(r.events), "robot": r}
+    res = {"ok": ok and r.handle_towards_operator is True and not r.events, "msg": msg, "vision_err_mm": err * 1000,
+           "handle_towards_operator": r.handle_towards_operator, "events": sorted(r.events), "robot": r,
+           "tries": len(tries), "lowest_mm": r.lowest * 1000}
     if r.released_at is not None:
         res["release_after_pull_s"] = r.released_at - r.pull[0]
     return res
@@ -262,20 +296,23 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--miss", action="store_true", help="aim the first grasp past the tool's tip")
     a = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     rng = np.random.default_rng(a.seed)
     if a.trials:
-        n_ok = 0
+        n_ok, lowest = 0, []
         for i in range(a.trials):
-            res = episode(rng)
+            res = episode(rng, miss=a.miss)
             n_ok += res["ok"]
-            print(f"trial {i + 1:2d}: {'OK  ' if res['ok'] else 'FAIL'} {res['msg']} | vision err "
-                  f"{res.get('vision_err_mm', float('nan')):.1f} mm | released "
+            lowest.append(res.get("lowest_mm", np.nan))
+            print(f"trial {i + 1:2d}: {'OK  ' if res['ok'] else 'FAIL'} {res['msg']} | {res.get('tries', 0)} tries | "
+                  f"vision err {res.get('vision_err_mm', float('nan')):.1f} mm | gripper lowest "
+                  f"{lowest[-1]:.1f} mm above the table | released "
                   f"{res.get('release_after_pull_s', float('nan')):.2f} s after the pull | {res.get('events', [])}")
-        print(f"success {n_ok}/{a.trials}")
+        print(f"success {n_ok}/{a.trials}, gripper never lower than {np.nanmin(lowest):.1f} mm above the table")
     else:
-        res = episode(rng, video=True)
+        res = episode(rng, video=True, miss=a.miss)
         print({k: v for k, v in res.items() if k != "robot"})
         r = res.get("robot")
         if r and r.frames:

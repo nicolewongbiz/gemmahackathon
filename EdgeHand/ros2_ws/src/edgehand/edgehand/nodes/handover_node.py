@@ -20,10 +20,13 @@ class HandoverNode(Node):
         super().__init__("handover_node")
         # Gemma names the tools on every locate: ~5 s on a laptop GPU, more on the Jetson
         self.locate_timeout = self.declare_parameter("locate_timeout", 30.0).value
+        # fake hardware's fingers always close fully, which would read as a missed grasp every time
+        check_grasp = self.declare_parameter("check_grasp", True).value
         self.robot = robot or MoveItRobot(self)
         self.state_pub = self.create_publisher(String, "/edgehand/state", 10)
         self.say_pub = self.create_publisher(String, "/edgehand/say", 10)
-        self.handover = Handover(self.robot, log=self.get_logger().info, state=self.publish_state)
+        self.handover = Handover(self.robot, log=self.get_logger().info, state=self.publish_state,
+                                 check_grasp=check_grasp)
         self.busy = threading.Lock()
         self.results = {}
         self.ids = itertools.count(1)
@@ -92,11 +95,20 @@ class HandoverNode(Node):
                 return
             grasp, handle_dir = r["grasp_xy"], np.array(r["handle_dir"])
             self.get_logger().info(f"{tool}: grasp ({grasp[0]:.3f}, {grasp[1]:.3f}), handle towards {np.round(handle_dir, 2)}")
-            ok, msg = self.handover.run(grasp, handle_dir)
+            ok, msg = self.handover.run(grasp, handle_dir, relocate=lambda: self._relocate(tool))
             self.say_pub.publish(String(data=f"Here's the {tool}." if ok else f"Handover failed: {msg}"))
             self.get_logger().info(f"handover: {ok} {msg}")
         finally:
             self.busy.release()
+
+    def _relocate(self, tool):
+        """After a missed grasp (the arm is back at the look pose): where the tool is now, or None."""
+        time.sleep(config.LOOK_SETTLE_S)
+        self.publish_state(f"looking for the {tool} again")
+        r = self._locate(tool)
+        if r is None or not r["found"]:
+            return None
+        return r["grasp_xy"], np.array(r["handle_dir"])
 
     def _locate(self, tool):
         """Ask vision for the tool; its answer comes back with the same id (no clock comparisons across machines)."""

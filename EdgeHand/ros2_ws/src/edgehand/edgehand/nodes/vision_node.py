@@ -22,7 +22,7 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from edgehand import config
 from edgehand.camera import StreamCamera, configured_source
-from edgehand.geometry import quat_from_R
+from edgehand.geometry import quat_from_R, table_z
 from edgehand.vision import TableMap, draw, find_tools
 
 
@@ -130,7 +130,7 @@ class VisionNode(Node):
         ps = PoseStamped()
         ps.header.stamp, ps.header.frame_id = self.get_clock().now().to_msg(), config.BASE_FRAME
         ps.pose.position.x, ps.pose.position.y = map(float, t["grasp_xy"])
-        ps.pose.position.z = config.TABLE_Z + config.TOOL_RADIUS_M
+        ps.pose.position.z = table_z(*t["grasp_xy"]) + config.TOOL_RADIUS_M
         hx, hy = t["handle_dir"]
         q = quat_from_R(np.array([[hx, -hy, 0], [hy, hx, 0], [0, 0, 1]]))
         ps.pose.orientation.x, ps.pose.orientation.y, ps.pose.orientation.z, ps.pose.orientation.w = map(float, q)

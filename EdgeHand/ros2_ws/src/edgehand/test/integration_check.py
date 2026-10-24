@@ -16,6 +16,7 @@ class Check(Node):
         self.req = self.create_publisher(String, "/edgehand/tool_request", 10)
         self.pull = self.create_publisher(Empty, "/test/pull", 10)
         self.stop = self.create_publisher(Empty, "/edgehand/stop", 10)
+        self.miss = self.create_publisher(Empty, "/test/miss_next", 10)
 
     def spin_until(self, cond, timeout):
         t0 = time.time()
@@ -82,6 +83,22 @@ def main():
     results["missing tool: says what it sees, no pick"] = told and not moves and any(
         "phillips" in s and "flathead" in s for s in c.says)
     print("--- scenario 4 says:", c.says, "| moves:", moves)
+
+    # 5. the first grasp closes on nothing: open, back to the look pose, vision again, second pick, handover
+    c.reset()
+    time.sleep(0.5)
+    c.miss.publish(Empty())
+    c.spin_until(lambda: False, 0.5)
+    c.req.publish(String(data="phillips"))
+    held = c.spin_until(lambda: any(s.startswith("holding") for s in c.states), 120)
+    if held:
+        c.pull.publish(Empty())
+    done = c.spin_until(lambda: "idle" in c.states[1:], 30)
+    closes = [s for s in c.cell if s == f"gripper -> {0.8}"]
+    results["missed grasp: looks again, picks again"] = held and done and len(closes) == 2 and \
+        any("closed on nothing" in s for s in c.cell) and "looking again" in c.states and \
+        any("again" in s and s.startswith("looking for") for s in c.states)
+    print("--- scenario 5 states:", [s for s in c.states if not s.startswith("holding: delta")])
 
     print("\n".join(f"{'PASS' if ok else 'FAIL'}  {name}" for name, ok in results.items()))
     sys.exit(0 if all(results.values()) else 1)
