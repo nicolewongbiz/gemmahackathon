@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from edgehand import config                                        # noqa: E402
+from edgehand import calibration, config                           # noqa: E402
 from edgehand.vision import TableMap, find_tools                   # noqa: E402
 
 FRAMES = Path(os.environ.get("EDGEHAND_FRAMES", config.ROOT / "data" / "frames"))
@@ -21,6 +21,16 @@ MATCH_PX = 60          # a detection belongs to a label if its grasp point is th
 MAX_GRASP_MM, MIN_DOT = 10.0, 0.9
 ROWS = []
 _namer = None
+# real frames need the real cell's tag positions: data/calibration.json (or $EDGEHAND_REAL_CALIBRATION), which the
+# other tests deliberately ignore (conftest.py)
+SITE = Path(os.environ.get("EDGEHAND_REAL_CALIBRATION", config.ROOT / "data" / "calibration.json"))
+
+
+@pytest.fixture(autouse=True)
+def site_calibration(monkeypatch):
+    if SITE.exists():
+        for key, v in calibration.values(json.loads(SITE.read_text())).items():
+            monkeypatch.setattr(config, key, v)
 
 
 def namer():

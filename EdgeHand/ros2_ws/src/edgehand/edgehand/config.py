@@ -114,3 +114,8 @@ SETTLE_S = 0.8                     # wait after arriving at the handover pose be
 # ---- Pi link (UDP, no ROS on the Pi) ----
 PI_UDP_PORT = 5005
 WATCHDOG_S = 0.5                   # no heartbeat for this long -> /edgehand/stop
+
+# ---- Site calibration: data/calibration.json from `python -m edgehand.measure_tags` overrides TABLE_TAGS,
+# TABLE_TOUCH_Z, LOOK_FLANGE_XYZ, LOOK_THETA, GRIPPER_EMPTY_POS (edgehand/calibration.py). Moving the cell = re-measure.
+from edgehand.calibration import apply as _apply_calibration    # noqa: E402
+_apply_calibration(globals())
