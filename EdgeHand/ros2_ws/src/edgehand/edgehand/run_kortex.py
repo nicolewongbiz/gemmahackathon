@@ -106,6 +106,38 @@ class Requests:
         return self.q.get()
 
 
+class ArmState:
+    """Tells the assistant what the arm is doing: {"type": "arm_state", "state": busy|holding|idle, "tool"} on the
+    phase port, on every change and every ~2 s so a late-started assistant syncs. On the change to idle, "tool" is
+    the one just handed over, so the assistant doesn't re-ask for it."""
+    def __init__(self, send, log=print):
+        self.send, self.log = send, log
+        self.state, self.tool, self.last_tool = "idle", None, None
+        self._stop = threading.Event()
+        threading.Thread(target=self._beat, daemon=True).start()
+
+    def update(self, handover_state, tool):
+        s = "holding" if handover_state.startswith("holding") else (
+            "idle" if handover_state in ("idle", "error", "stopped") else "busy")
+        if s == "idle":
+            self.last_tool, tool = tool or self.last_tool, tool or self.last_tool
+        else:
+            self.last_tool = tool
+        if (s, tool) != (self.state, self.tool):
+            self.state, self.tool = s, tool
+            self._emit()
+
+    def _emit(self):
+        try:
+            self.send({"type": "arm_state", "state": self.state, "tool": self.tool})
+        except OSError as e:
+            self.log(f"arm_state not sent: {e}")
+
+    def _beat(self):
+        while not self._stop.wait(2.0):
+            self._emit()
+
+
 def _read_stdin(requests):
     while True:
         try:
@@ -199,7 +231,17 @@ def main():
     if a.robot == "kortex":
         from edgehand.kortex_robot import KortexRobot
         robot = KortexRobot()
-    h = Handover(robot, log=print, state=lambda s: print("state:", s)) if robot else None
+    arm_state = None
+    if a.listen:
+        from edgehand import link
+        arm_state = ArmState(lambda m: link.send(m, "127.0.0.1", config.PHASE_UDP_PORT))
+    current = {"tool": None}
+
+    def on_state(s):
+        print("state:", s)
+        if arm_state:
+            arm_state.update(s, current["tool"])
+    h = Handover(robot, log=print, state=on_state) if robot else None
 
     def relocate(tool):
         time.sleep(config.LOOK_SETTLE_S)
@@ -263,10 +305,13 @@ def main():
                     return
                 continue
             requests.start(tool)
+            current["tool"] = tool
             try:
                 ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool))
             finally:
                 requests.finish()
+                if arm_state:
+                    arm_state.update("idle", tool)
             print("handover:", "OK" if ok else "FAILED", msg)
             if a.tool:
                 return

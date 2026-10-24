@@ -60,3 +60,18 @@ def test_typed_and_link_requests_share_one_queue():
     r.typed("hand me the green one")
     r.on_event({"type": "request", "tool": next(iter(config.TOOLS))})
     assert r.next()[0] == "text" and r.next()[0] == "tool"
+
+
+def test_arm_state_events_follow_the_handover():
+    import time
+    from edgehand.run_kortex import ArmState
+    sent = []
+    st = ArmState(sent.append, log=lambda *a: None)
+    st.update("picking", "torx")
+    st.update("presenting", "torx")                      # still busy: no new event
+    st.update("holding: pull the handle or press RELEASE", "torx")
+    st.update("idle", "torx")
+    st._stop.set()
+    kinds = [(m["state"], m["tool"]) for m in sent if m["type"] == "arm_state"]
+    assert kinds[:3] == [("busy", "torx"), ("holding", "torx"), ("idle", "torx")]   # idle carries the tool just handed
+    assert all(m["type"] == "arm_state" for m in sent)
