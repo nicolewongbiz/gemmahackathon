@@ -74,7 +74,7 @@ There's no switch and no Wi-Fi.
 
 ### 2.2 Perception: wrist camera (workstation)
 - **Camera:** the RealSense on the wrist, read with OpenCV as a USB webcam (`CAMERA_SOURCE = "usb"`). `"rtsp"` is for an arm with a Kinova Vision module and `"topic"` for a ROS image topic.
-- **Look pose:** frames are only used with the arm at `LOOK_FLANGE_XYZ` / `LOOK_THETA`, gripper straight down and high over the tray. The default (flange 0.40, 0, 0.62 = Kortex tool frame z 0.50) is the one the GemmaHackathon sim found reachable, seeing tags across x 0.32–0.62, y ±0.25 past the fingers. The real RealSense's mount and lens differ, so check the view (Phase 1.5).
+- **Look pose:** frames are only used with the arm at `LOOK_FLANGE_XYZ` / `LOOK_THETA`, gripper roughly straight down and high over the tray. The default is the pose measured on the real cell (Oct 24): Web App tool pose (0.266, −0.028, 0.447), θ (174.3, −7.2, 89.8), with all 4 tags in view and CALIBRATED on the real RealSense. The slight tilt is absorbed by the tag homography. Re-check the view if the tray or tags move (Phase 1.5).
 - **Calibration:** 4 AprilTags (tag36h11, IDs 0–3, 5 cm) at the tray corners, centres measured in the robot base frame (`TABLE_TAGS`). Every frame: tags → homography pixel → table (x, y). Tools lie flat, so z = table height + tool radius.
 - **Finding tools** (`vision.find_tools`): any colourful grip with a grey, unsaturated part sticking out of one end, on a dark mat. Grips are split by hue, so touching tools of different colours stay separate. The metal end is the shaft. Black grips are invisible on a dark mat, and stacked tools aren't supported.
 - **Naming tools** (`namer.GemmaNamer`): Gemma 4 E4B sees the tray image with each tool's number drawn on its handle, plus `TOOL_DESCRIPTIONS` ("screwdriver with a red handle"), and returns `{"1": "phillips", "2": "unknown"}`. Names are whitelisted. `VISION_NAMER = "colour"` names by handle colour (`TOOLS` HSV ranges) instead.
@@ -206,7 +206,7 @@ Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
 | `VISION_NAMER` | "gemma" | "gemma" or "colour" |
 | `DEFAULT_TOOL` | phillips | what the REQUEST button asks for |
 | `CAMERA_SOURCE`, `CAMERA_USB_INDEX` | "usb", 0 | wrist camera: "usb" (RealSense), "rtsp" (Kinova Vision), "topic" |
-| `LOOK_FLANGE_XYZ`, `LOOK_THETA` | (0.40, 0, 0.62), (180, 0, 90) | the look pose: flange position, Kortex angles (Phase 1.5) |
+| `LOOK_FLANGE_XYZ`, `LOOK_THETA` | (0.254, −0.043, 0.565), (174.3, −7.2, 89.8) | the look pose, measured on the real cell Oct 24 (Phase 1.5). The sim uses its own (0.40, 0, 0.62) because its camera mount differs |
 | `LOOK_SETTLE_S`, `LOCATE_SKIP_FRAMES` | 0.5, 5 | wait at the look pose; frames dropped after a locate request |
 | `TABLE_TAGS` | measured | tag centres (m, base frame) |
 | `TABLE_TOUCH_Z` | {} (measure) | flange z with the closed fingertips touching each tag (Phase 1.6); a plane through them is the table. Empty = flat at `TABLE_Z` |

@@ -39,8 +39,12 @@ CAMERA_TOPIC = "/camera/camera/color/image_raw"   # for CAMERA_SOURCE = "topic"
 # tray. Flange (end_effector_link) position + Kortex theta_x/y/z. From the GemmaHackathon sim: tool frame at
 # (0.40, 0, 0.50) = flange at z 0.62 reaches and sees tags across x 0.32-0.62, y +-0.25 past the fingers;
 # 0.55 / 0.67 is out of reach pointing down. VERIFY: jog there in the Web App, check all 4 tags are in view.
-LOOK_FLANGE_XYZ = (0.40, 0.0, 0.62)
-LOOK_THETA = (180.0, 0.0, 90.0)    # Kortex Euler (deg, extrinsic XYZ): pointing straight down
+# Measured on the real cell (Oct 24, RealSense on the wrist): all 4 tags in view and CALIBRATED. Web App tool pose
+# (0.266, -0.028, 0.447) theta (174.3, -7.2, 89.8) = this flange pose (tool frame z 0.12). Slightly tilted, which the
+# tag homography absorbs. 0.5 m above the table, so no clearance concern. The sim's camera mount differs, so sim trials
+# check this pose still sees the tags there too.
+LOOK_FLANGE_XYZ = (0.254, -0.043, 0.565)
+LOOK_THETA = (174.3, -7.2, 89.8)   # Kortex Euler (deg, extrinsic XYZ): roughly straight down
 LOOK_SETTLE_S = 0.5                # wait at the look pose before the frame (no motion blur)
 LOCATE_SKIP_FRAMES = 5             # frames to drop after a locate request (the RTSP stream lags a few frames)
 TABLE_TAGS = {                     # tag36h11 id -> tag centre (x, y). MEASURE ON SITE (README Phase 1.4)

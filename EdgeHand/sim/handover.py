@@ -15,6 +15,10 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "ros2_ws" / "src" / "edgehand"))
 from edgehand import config                                    # noqa: E402
+
+# config.LOOK_* is the real cell's pose, measured with the RealSense on the real wrist. The Menagerie model's wrist
+# camera sits elsewhere, so the sim looks from the pose the sim was tuned with (sees all 4 tags across the tray).
+config.LOOK_FLANGE_XYZ, config.LOOK_THETA = (0.40, 0.0, 0.62), (180.0, 0.0, 90.0)
 from edgehand.geometry import look_pose                         # noqa: E402
 from edgehand.handover import Handover                          # noqa: E402
 from edgehand.vision import TableMap, detect_tools, draw        # noqa: E402
