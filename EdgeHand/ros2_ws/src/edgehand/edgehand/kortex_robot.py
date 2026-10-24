@@ -133,18 +133,27 @@ class KortexRobot:
         return self._execute(a)
 
     def _execute(self, a):
-        """Run a Kortex action and wait for its end. True when it ended normally."""
+        """Run a Kortex action and wait for its end. True when it ended normally.
+        Kortex replays the last action notification to a new subscriber (an old ABORT, say), so only an END/ABORT
+        that arrives AFTER our own action's START counts; anything before is logged and ignored."""
         B = self.B
-        done, result = threading.Event(), {}
+        done, result, started = threading.Event(), {}, threading.Event()
 
         def cb(n):
-            if n.action_event in (B.ACTION_END, B.ACTION_ABORT):
-                result["event"] = n.action_event
-                code = getattr(n, "abort_details", 0)
-                try:
-                    result["why"] = f"{B.SubErrorCodes.Name(code)} ({code})"
-                except ValueError:
-                    result["why"] = str(code)
+            ev = n.action_event
+            code = getattr(n, "abort_details", 0)
+            try:
+                why = f"{B.SubErrorCodes.Name(code)} ({code})"
+            except ValueError:
+                why = str(code)
+            if ev == B.ACTION_START:
+                started.set()
+            elif ev in (B.ACTION_END, B.ACTION_ABORT):
+                if not started.is_set():
+                    self.log(f"kortex: ignoring a stale {B.ActionEvent.Name(ev)} notification ({why}) from before "
+                             "our action started")
+                    return
+                result["event"], result["why"] = ev, why
                 done.set()
         state = self.base.GetArmState().active_state
         if state != B.ARMSTATE_SERVOING_READY:
@@ -154,6 +163,10 @@ class KortexRobot:
         try:
             self._stopped = False
             self.base.ExecuteAction(a)
+            if not started.wait(5.0):
+                self.log("kortex: the action never reported START; stopping")
+                self.base.Stop()
+                return False
             if not done.wait(config.KORTEX_ACTION_TIMEOUT_S):
                 self.log("kortex: action timed out; stopping")
                 self.base.Stop()

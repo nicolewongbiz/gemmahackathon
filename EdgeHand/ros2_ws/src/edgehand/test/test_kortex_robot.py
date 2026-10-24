@@ -39,6 +39,66 @@ def test_free_move_turns_only_at_height():
         assert table_clearance(p, R) > 0.2
 
 
+class FakeBase:
+    """Just enough of BaseClient for _execute: replays a stale ABORT on subscribe, then START and END on execute."""
+    def __init__(self, B, stale=True, end=None):
+        self.B, self.stale, self.end, self.cb, self.stopped = B, stale, end if end is not None else B.ACTION_END, None, 0
+        self.executed = []
+
+    def GetArmState(self):
+        return type("S", (), {"active_state": self.B.ARMSTATE_SERVOING_READY})()
+
+    def OnNotificationActionTopic(self, cb, opts):
+        self.cb = cb
+        if self.stale:
+            cb(self._n(self.B.ACTION_ABORT, 3))                 # the previous action's INVALID_PARAM, replayed
+        return "handle"
+
+    def ExecuteAction(self, a):
+        self.executed.append(a)
+        self.cb(self._n(self.B.ACTION_START, 0))
+        self.cb(self._n(self.end, 0))
+
+    def Unsubscribe(self, h):
+        pass
+
+    def Stop(self):
+        self.stopped += 1
+
+    def _n(self, ev, code):
+        return type("N", (), {"action_event": ev, "abort_details": code})()
+
+
+def _robot_with_base(base):
+    r = KortexRobot.__new__(KortexRobot)
+    from kortex_api.autogen.messages import Base_pb2
+    r.B, r.base, r.log, r._stopped, r.tool_z = Base_pb2, base, lambda *a: None, False, 0.12
+    return r
+
+
+def test_execute_ignores_the_replayed_abort_and_waits_for_its_own_end():
+    from kortex_api.autogen.messages import Base_pb2 as B
+    base = FakeBase(B, stale=True)
+    r = _robot_with_base(base)
+    logs = []
+    r.log = logs.append
+    assert r._execute(B.Action()) is True
+    assert len(base.executed) == 1 and base.stopped == 0
+    assert any("stale ACTION_ABORT" in m for m in logs)
+
+
+def test_execute_reports_a_real_abort():
+    from kortex_api.autogen.messages import Base_pb2 as B
+    base = FakeBase(B, stale=True, end=B.ACTION_ABORT)
+    r = _robot_with_base(base)
+    import time as _t
+    _t.sleep = lambda s: None                                        # the post-abort state read waits 0.5 s
+    try:
+        assert r._execute(B.Action()) is False
+    finally:
+        import importlib; importlib.reload(_t)
+
+
 def test_near_joint_limit_spots_the_folded_arm():
     from edgehand.kortex_robot import near_joint_limit
     lab = [208.0, 295.4, 323.3, 212.2, 14.3, 111.1, 140.3]          # measured in Retract: joint 4 = -147.8
