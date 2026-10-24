@@ -1,9 +1,28 @@
-"""edgehand/phase_player.py timeline handling and edgehand/link.py messages (no window, no robot)."""
-import socket, sys, time
+"""edgehand/phase_player.py timeline handling and edgehand/link.py messages (no window, no robot).
+
+The last test replays the real clip (~/Desktop/clippingdemo.mp4, skipped if it isn't there) at 8x without a window and
+listens to the requests on a spare UDP port: about 9 s.    python -m pytest test/test_phase.py -q
+"""
+import os, socket, subprocess, sys, time
 from pathlib import Path
+import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from edgehand import link                                           # noqa: E402
+from edgehand import config, link                                   # noqa: E402
 from edgehand.phase_player import changes, load_segments, phase_at  # noqa: E402
+
+PKG = Path(__file__).resolve().parents[1]                           # ros2_ws/src/edgehand
+ANNOTATION = PKG.parents[2] / "data" / "phases" / "clippingdemo.csv"  # EdgeHand/data/phases/clippingdemo.csv
+CLIP = Path.home() / "Desktop" / "clippingdemo.mp4"
+EXPECTED = [(0, "Parent vessel exposure", "phillips"), (6, "Clipping", "torx"), (18, "Dome exposure", "flathead"),
+            (54, "Clipping", "torx"), (58, "Dome exposure", "flathead")]
+
+
+def spare_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
 
 
 def write(tmp_path, rows):
@@ -26,11 +45,37 @@ def test_requests_only_for_mapped_phases(tmp_path):
                                                                             (20, "Clipping", "flathead")]
 
 
+def test_clippingdemo_annotation_fires_on_changes_only():
+    """The hand annotation of the demo clip: 7 rows, 5 segments (6-18 s is one Clipping), one request per change."""
+    segs = load_segments(ANNOTATION, duration_s=67.4)
+    assert [(s, ph) for s, _, ph in segs] == [(0, "Parent vessel exposure"), (6, "Clipping"), (18, "Dome exposure"),
+                                              (54, "Clipping"), (58, "Dome exposure")]
+    assert segs[-1][1] == 67.4
+    assert set(config.PHASE_TOOLS.values()) <= set(config.TOOLS)
+    assert changes(segs, config.PHASE_TOOLS) == EXPECTED
+
+
+@pytest.mark.skipif(not CLIP.exists(), reason=f"demo clip not at {CLIP}")
+def test_player_sends_the_requests_on_time():
+    """End to end without the arm: the player replays the real clip at 8x with no window, a link.Listener stands in
+    for run_kortex --listen. Order, tool, phase and spacing (in clip seconds, from the first request) must match."""
+    port, got = spare_port(), []
+    link.Listener(lambda m: got.append((time.time(), m)), port=port)
+    speed = 8
+    p = subprocess.run([sys.executable, "-m", "edgehand.phase_player", str(CLIP), str(ANNOTATION), "--no-window",
+                        "--speed", str(speed), "--port", str(port)], cwd=PKG, capture_output=True, text=True,
+                       timeout=90, env=dict(os.environ, EDGEHAND_CALIBRATION="none"))
+    assert p.returncode == 0, p.stderr
+    time.sleep(0.2)
+    assert [(m["tool"], m["phase"]) for _, m in got] == [(tool, ph) for _, ph, tool in EXPECTED], p.stdout
+    assert all(m["type"] == "request" and m["source"] == "phase" for _, m in got)
+    t0 = got[0][0]
+    measured = [(ta - t0) * speed for ta, _ in got]
+    assert all(abs(m - want) <= 0.5 for m, (want, _, _) in zip(measured, EXPECTED)), measured
+
+
 def test_link_round_trip_with_heartbeats():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
+    port = spare_port()
     got = []
     listener = link.Listener(got.append, port=port)
     beat = link.Heartbeat("jetson", port=port)

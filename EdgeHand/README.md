@@ -223,17 +223,31 @@ python -m edgehand.run_kortex                           # type requests; Gemma p
 Ctrl-C sends a Kortex Stop. The Pi buttons aren't wired into this runner.
 
 ### 3.2 Surgical phase → instrument, and plugging in other nodes
-**Demo Channel A.** A surgical phase-recognition model runs offline on a public clip (owner-enabled download, licence allows reuse). Its predictions go in a CSV (`time_s,phase` rows, one per phase change or per second). `edgehand/phase_player.py` plays the clip from the local file with the current phase, the instrument it calls for and a phase timeline over it. Each time a phase in `PHASE_TOOLS` starts, it sends a tool request to the arm's laptop. The timeline on screen is the model's real output on that clip, replayed in sync. `--placeholder` stamps PLACEHOLDER on any timeline that isn't.
+**Demo Channel A.** `edgehand/phase_player.py` plays a public aneurysm-clipping clip (`~/Desktop/clippingdemo.mp4`, 67 s, owner-enabled download, licence allows reuse) at its own frame rate with the current phase, the instrument it calls for, the last request sent and a phase timeline over it. Each time the phase **changes** to one in `config.PHASE_TOOLS` it sends one `request` to the arm's laptop over the event link (below). **There is no phase model in the demo.** The timeline is a hand annotation, `data/phases/clippingdemo.csv` (`time_s,phase` rows; repeated rows of one phase are a single segment), and the overlay says so: "Phase (annotated)" and "HAND-ANNOTATED phase timeline (not model output)". Never present it as model output.
+
+| Clip time | Phase (annotated) | Request sent at the change | Stand-in tool (`PHASE_TOOLS`, editable) |
+|---|---|---|---|
+| 0–6 s | Parent vessel exposure | 0 s | phillips |
+| 6–18 s | Clipping | 6 s | torx |
+| 18–54 s | Dome exposure | 18 s | flathead |
+| 54–58 s | Clipping | 54 s | torx |
+| 58 s–end | Dome exposure | 58 s | flathead |
+
+Running the demo, from `EdgeHand/ros2_ws/src/edgehand` with the venv of §3.1, two terminals on the laptop the arm is on:
 ```bash
-python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 phases.csv --headless          # list the requests it would send
-python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 phases.csv                     # play + send to the arm on this laptop
-python -m edgehand.phase_player clip.mp4 phases.csv --host 192.168.55.100 --map "Clip application=flathead"   # from the Jetson
+python -m edgehand.run_kortex --listen --namer first                                        # 1: the arm, taking requests over the link
+python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 ../../../data/phases/clippingdemo.csv   # 2: play + send (SPACE pause, ESC quit)
+python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 ../../../data/phases/clippingdemo.csv --headless   # just list the requests
+python -m edgehand.phase_player clip.mp4 phases.csv --host 192.168.55.100 --map "Clipping=flathead"           # from the Jetson, mapping override
 ```
-**Making phases.csv.** `phase/predict_phases.py` runs the neurosurgical phase model ([veronicawang1/neurosurgical_phase_recognition](https://github.com/veronicawang1/neurosurgical_phase_recognition), aneurysm clipping, 4 phases: Brain Exposure, Parent Vessel Identification, Dome and Neck Identification, Clipping) on the clip. It follows the repo's pipeline: 1 FPS frames, fine-tuned ResNet50 features, MS-TCN (2×8 layers, 128 filters), then Viterbi with the repo's surgical-ordering prior, because the learned transition matrix needs the training labels. It needs the two trained weight files from the training VM:
+A handover takes 20–40 s, so a request that arrives while one is running (the 6 s change, six seconds into the handover the 0 s change started; the 18 s one too if that handover is still going) is **dropped by design** with a log line in the runner, never queued; the next change once the arm is free is taken. Checked end to end without the arm: `test/test_phase.py` replays the clip at 8x with `--no-window` against a `link.Listener` and found the five requests at 0.0 / 5.9 / 17.9 / 53.8 / 58.3 s in clip time (tolerance 0.5 s); it skips when the clip isn't on the Desktop.
+
+**Making phases.csv from the model (not used in the demo).** `phase/predict_phases.py` runs the neurosurgical phase model ([veronicawang1/neurosurgical_phase_recognition](https://github.com/veronicawang1/neurosurgical_phase_recognition), aneurysm clipping, 4 phases: Brain Exposure, Parent Vessel Identification, Dome and Neck Identification, Clipping) on the clip. It follows the repo's pipeline: 1 FPS frames, fine-tuned ResNet50 features, MS-TCN (2×8 layers, 128 filters), then Viterbi with the repo's surgical-ordering prior, because the learned transition matrix needs the training labels. It needs the two trained weight files from the training VM:
 ```bash
 uv venv phase/.venv --python 3.11 && uv pip install --python phase/.venv/bin/python -r phase/requirements.txt
 phase/.venv/bin/python phase/predict_phases.py --repo ../neurosurgical_phase_recognition --video ~/Desktop/clippingdemo.mp4 \
-    --backbone <finetuned_backbone.pt> --mstcn <best_mstcn.pt> --out data/phases/clippingdemo.csv   # ~40 s on an M-series Mac
+    --backbone <finetuned_backbone.pt> --mstcn <best_mstcn.pt> --out data/phases/clippingdemo_model.csv   # ~40 s on an M-series Mac
+# play that one with --model-output, so the overlay labels it as model predictions instead of annotation
 ```
 
 **Other nodes** (`edgehand/link.py`). Small JSON events over UDP port `EVENT_UDP_PORT` (5006) to the laptop, which is the only computer that commands the arm: `request` (tool, source, phase), `release`, `stop`, and a `heartbeat` twice a second. Nodes send events, never motions. Plugging in the Jetson's USB-C gives the laptop 192.168.55.100 with no setup. A node that isn't plugged in just isn't heard, and the laptop carries on with typed requests. `run_kortex --listen` turns the listener on.

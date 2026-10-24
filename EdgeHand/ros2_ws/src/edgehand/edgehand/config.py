@@ -143,9 +143,15 @@ WATCHDOG_S = 0.5                   # no heartbeat for this long -> /edgehand/sto
 
 # ---- Event link (edgehand/link.py): Jetson / Pi / phase player -> laptop, JSON over UDP ----
 EVENT_UDP_PORT = 5006
-# Surgical phase (the phase model's label) -> the tool to fetch when that phase starts. Phases not listed fetch
-# nothing. Fill in with the model's real phase names and the stand-in tools on the tray.
-PHASE_TOOLS = {}
+# Surgical phase (a label in the phases CSV) -> the tool class to fetch when that phase STARTS (a change only, not
+# every row). Phases not listed fetch nothing. The names are the hand annotation in data/phases/clippingdemo.csv;
+# the tools are stand-ins for the demo tray (the clip's real instruments aren't on it): edit freely, or add to it
+# per run with phase_player --map "Phase=tool". Every value must be a key of TOOLS.
+PHASE_TOOLS = {
+    "Parent vessel exposure": "phillips",
+    "Clipping": "torx",
+    "Dome exposure": "flathead",
+}
 
 # ---- Voice (edgehand/voice_node.py, on the laptop: its mic -> Gemma -> request over the event link) ----
 VOICE_MIC_NAME = "MacBook Pro Microphone"   # ffmpeg/AVFoundation input picked by name (indexes shift with an iPhone)
