@@ -127,8 +127,7 @@ class KortexRobot:
                 done.set()
         state = self.base.GetArmState().active_state
         if state != B.ARMSTATE_SERVOING_READY:
-            self.log(f"kortex: not moving, arm state is {B.ArmState.Name(state)} (clear the fault / let the "
-                     "current action finish; the Web App or another session may be driving it)")
+            self.log(f"kortex: not moving, arm state is {B.ArmState.Name(state)}. {self._state_hint(state)}")
             return False
         h = self.base.OnNotificationActionTopic(cb, B.NotificationOptions())
         try:
@@ -144,10 +143,19 @@ class KortexRobot:
             why = "stop" if self._stopped else (result.get("why") or "no details: unreachable pose, fault, or a "
                                                  "zero-length move")
             time.sleep(0.5)
-            self.log(f"kortex: move aborted ({why}); arm state "
-                     f"{B.ArmState.Name(self.base.GetArmState().active_state)}")
+            state = self.base.GetArmState().active_state
+            self.log(f"kortex: move aborted ({why}); arm state {B.ArmState.Name(state)}. {self._state_hint(state)}")
             return False
         return True
+
+    def _state_hint(self, state):
+        B = self.B
+        if state in (B.ARMSTATE_SERVOING_MANUALLY_CONTROLLED, B.ARMSTATE_SERVOING_PLAYING_SEQUENCE):
+            return ("Something else holds the arm: the Web App's jog/pose panel or a gamepad. Leave that panel "
+                    "(dashboard page) or unplug the gamepad, then retry. (A refused reach shows as INVALID_PARAM.)")
+        if state == B.ARMSTATE_IN_FAULT:
+            return "Clear the fault in the Web App (or the E-stop is pressed)."
+        return "Wait for the current action to finish, or stop it in the Web App."
 
     def _feedback(self):
         return self.cyclic.RefreshFeedback()
