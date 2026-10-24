@@ -242,8 +242,14 @@ def _width_profile(mask_pts, centre, axis, n=40):
     return (edges[:-1] + edges[1:]) / 2, width
 
 
+LAST_NOTES = []                    # find_tools_contrast: why big blobs were dropped (touching tools), for the UI
+
+
 def find_tools_contrast(frame, tmap):
-    """Objects that differ from the mat, split into handle and shaft by their width profile. See the module doc."""
+    """Objects that differ from the mat, split into handle and shaft by their width profile. See the module doc.
+    Blobs the size of several tools that don't have a handle-and-shaft shape are reported in LAST_NOTES: tools that
+    touch or cross merge into one blob and can't be told apart; the operator should separate them."""
+    LAST_NOTES.clear()
     if tmap.H is None:
         return []
     img, T = top_down(frame, tmap)
@@ -292,6 +298,9 @@ def find_tools_contrast(frame, tmap):
         handle_w = np.percentile(width[: n // 2][width[: n // 2] > 0], 80) if np.any(width[: n // 2] > 0) else 0
         shaft_w = np.percentile(width[n // 2:][width[n // 2:] > 0], 20) if np.any(width[n // 2:] > 0) else 0
         if handle_w <= 0 or length / handle_w < config.MIN_ELONGATION or shaft_w > 0.6 * handle_w:
+            if area_m2 > 3 * config.TOOL_MIN_AREA_M2:
+                LAST_NOTES.append(f"a {length / k * 100:.0f} cm blob without a handle-and-shaft shape: tools "
+                                  "touching or crossing? separate them")
             continue                                              # a blob that isn't a handle with a shaft
         thr = (handle_w + shaft_w) / 2
         narrow = width < thr

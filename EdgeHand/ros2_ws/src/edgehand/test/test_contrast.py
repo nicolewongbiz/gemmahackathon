@@ -93,3 +93,11 @@ def test_black_handle_with_a_red_cap_is_phillips():
     tools = find_tools_contrast(img, tm_for(img))
     assert len(tools) == 1 and tools[0]["colour"] == "phillips"
     assert np.linalg.norm(tools[0]["grasp_xy"] - g) < 0.006
+
+
+def test_touching_tools_are_reported_not_silently_dropped():
+    from edgehand import vision
+    # two screwdrivers lying across each other: one blob, no clean handle-and-shaft shape
+    img = synthetic.frame([("black", (0.45, 0.0), (0, 1)), ("green", (0.45, 0.02), (1, 0))], mat=WHITE)
+    tools = find_tools_contrast(img, tm_for(img))
+    assert len(tools) < 2 and any("touching" in n for n in vision.LAST_NOTES)

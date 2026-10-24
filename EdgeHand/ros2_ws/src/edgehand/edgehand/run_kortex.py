@@ -132,6 +132,9 @@ class Eyes:
             tools = [dict(t, tool=n) for t, n in zip(found, names) if n]
         print("vision:", ", ".join(f"{t['tool']} at ({t['grasp_xy'][0]:.3f}, {t['grasp_xy'][1]:.3f})" for t in tools)
               or "no tools")
+        from edgehand.vision import LAST_NOTES
+        for note in LAST_NOTES:
+            print("vision:", note)
         self.last = draw(f, self.tm, tools)
         cv2.imwrite(str(Path(tempfile.gettempdir()) / "edgehand_last_look.jpg"), self.last)   # for debugging
         if show:
