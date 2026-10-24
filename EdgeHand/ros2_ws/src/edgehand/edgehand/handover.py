@@ -46,12 +46,13 @@ class Handover:
         if not ok:
             raise RuntimeError(f"{name} failed")
 
-    def plan_targets(self, grasp_xy, handle_dir, current_R=None):
+    def plan_targets(self, grasp_xy, handle_dir, current_R=None, tool_radius=None):
         """Flange poses for every waypoint. Raises ValueError if any is outside WORKSPACE, or would bring the closed
         fingertips closer to the table than TABLE_CLEARANCE_M. The fingers close across the tool, so the grasp is
         the same turned by 180 degrees: given the arm's current orientation, the pick yaw needing the smaller wrist
         turn is used, and the handover orientation is flipped to match so the handle still faces the operator."""
-        z = table_z(*grasp_xy) + config.TOOL_RADIUS_M + config.AIR_GAP_M
+        radius = config.TOOL_RADIUS_M if tool_radius is None else tool_radius
+        z = table_z(*grasp_xy) + radius + config.AIR_GAP_M
         d = np.asarray(handle_dir, float)
         R_pick, R_give = tool_down_R(d), handover_R()
         if current_R is not None:
@@ -110,7 +111,7 @@ class Handover:
             self.state("error")
             return False, str(e)
 
-    def run(self, grasp_xy, handle_dir, relocate=None):
+    def run(self, grasp_xy, handle_dir, relocate=None, tool_radius=None):
         """Pick the tool at grasp_xy and hand it over. After a missed grasp the arm goes back to the look pose and
         relocate() -> (grasp_xy, handle_dir) or None says where the tool is now (relocate=None: no retries).
         A tool still in the gripper from an interrupted handover is handed over first. Returns (ok, message)."""
@@ -123,7 +124,7 @@ class Handover:
         r = self.robot
         try:
             for attempt in range(1, config.PICK_ATTEMPTS + 1):
-                t = self.plan_targets(grasp_xy, handle_dir, self._current_R())
+                t = self.plan_targets(grasp_xy, handle_dir, self._current_R(), tool_radius)
                 if self._pick(t):
                     break
                 self.log(f"missed the tool (try {attempt} of {config.PICK_ATTEMPTS})")

@@ -101,6 +101,11 @@ VISION_GEMMA_MODEL = os.environ.get("EDGEHAND_VISION_MODEL", GEMMA_MODEL)   # E4
 GRASP_SIDE = "handle"
 TOOL_RADIUS_M = 0.005              # grasp height above the table: radius of the part gripped (precision handle ~10 mm)
 GRASP_FROM_FERRULE_M = 0.02        # grasp this far from where the handle ends (on the GRASP_SIDE)
+# Per-tool overrides (class -> value), for tools whose handle differs: the clear screwdriver's translucent handle is
+# fatter and shows weak contrast, so its measured ferrule sits a little into the handle; grasp it 1 cm further in
+# and a bit higher (it was clipping the collar edge on the cell).
+GRASP_FROM_FERRULE_BY_CLASS = {"clear": 0.03}
+TOOL_RADIUS_BY_CLASS = {"clear": 0.008}
 
 # ---- Motion (MoveIt 2 via ros2_kortex) ----
 PLANNING_GROUP = "manipulator"

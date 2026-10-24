@@ -402,3 +402,10 @@ def test_open_or_empty_gripper_is_not_holding():
     assert not h.holding_something()
     r.grip_pos = 0.79
     assert not h.holding_something()
+
+
+def test_tool_radius_override_raises_the_grasp():
+    h = Handover(FakeRobot(), log=lambda *a: None)
+    base = h.plan_targets((0.45, 0.0), (0, 1))["grasp"][0][2]
+    fat = h.plan_targets((0.45, 0.0), (0, 1), tool_radius=config.TOOL_RADIUS_M + 0.005)["grasp"][0][2]
+    assert np.isclose(fat - base, 0.005)

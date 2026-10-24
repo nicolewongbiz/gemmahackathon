@@ -29,6 +29,7 @@ def tm_for(img):
 ])
 def test_any_handle_colour_on_a_white_mat(name, g, d, monkeypatch):
     monkeypatch.setattr(config, "SEGMENTATION", "contrast")
+    monkeypatch.setattr(config, "GRASP_FROM_FERRULE_BY_CLASS", {})        # geometry only: no per-class offsets
     img = synthetic.frame([(name, g, d)], mat=WHITE)
     tools = find_tools(img, tm_for(img))
     assert len(tools) == 1, [t.get("width_m") for t in tools]
@@ -101,3 +102,18 @@ def test_touching_tools_are_reported_not_silently_dropped():
     img = synthetic.frame([("black", (0.45, 0.0), (0, 1)), ("green", (0.45, 0.02), (1, 0))], mat=WHITE)
     tools = find_tools_contrast(img, tm_for(img))
     assert len(tools) < 2 and any("touching" in n for n in vision.LAST_NOTES)
+
+
+def test_per_class_grasp_offset(monkeypatch):
+    monkeypatch.setattr(config, "GRASP_SIDE", "handle")
+    monkeypatch.setattr(config, "GRASP_FROM_FERRULE_BY_CLASS", {"clear": 0.03})
+    synthetic.COLOURS["bluecollar"] = (20, 20, 20)
+    g, d = (0.45, 0.0), np.array([0.0, 1.0])
+    ferrule = np.array(g) + d * config.GRASP_FROM_FERRULE_M
+    collar_c = ferrule + d * 0.0075
+    n = np.array([-d[1], d[0]]) * 0.012
+    collar = [collar_c - d * 0.0075 + n, collar_c + d * 0.0075 + n, collar_c + d * 0.0075 - n, collar_c - d * 0.0075 - n]
+    img = synthetic.frame([("black", g, d)], mat=WHITE, extra=[(collar, (200, 90, 20))])   # BGR blue collar
+    t = find_tools_contrast(img, tm_for(img))[0]
+    assert t["colour"] == "clear"
+    assert np.linalg.norm(t["grasp_xy"] - (ferrule + d * 0.03)) < 0.008                       # 3 cm in, not 2

@@ -350,7 +350,8 @@ def main():
             requests.start(tool)
             current["tool"] = tool
             try:
-                ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool))
+                radius = getattr(config, "TOOL_RADIUS_BY_CLASS", {}).get(tool)
+                ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool), tool_radius=radius)
             finally:
                 requests.finish()
                 if arm_state:

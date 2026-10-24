@@ -327,23 +327,25 @@ def find_tools_contrast(frame, tmap):
         ferrule, handle = to_table(ferrule_uv), to_table(handle_uv)
         d = handle - ferrule
         d /= np.linalg.norm(d)
-        grasp = grasp_point(ferrule, d)
-        if not on_tray(grasp):
-            continue
         # the outline back in camera pixels, for colour_class, the namer's marks and draw()
         cam = cv2.perspectiveTransform(c.reshape(-1, 1, 2).astype(np.float32), Hinv @ Tinv).astype(np.int32)
+        colour = colour_class(hsv, cam)
+        grasp = grasp_point(ferrule, d, colour)
+        if not on_tray(grasp):
+            continue
         out.append({"grasp_xy": grasp, "handle_dir": d, "grasp_px": tmap.table_to_px(*grasp),
                     "handle_px": tmap.table_to_px(*handle), "area": cv2.contourArea(cam), "contour": cam,
-                    "colour": colour_class(hsv, cam), "width_m": handle_w / k, "length_m": length / k,
+                    "colour": colour, "width_m": handle_w / k, "length_m": length / k,
                     "shaft_w_m": shaft_w / k})
     return sorted(out, key=lambda t: -t["area"])
 
 
-def grasp_point(ferrule, handle_dir):
-    """Where the fingers close: GRASP_FROM_FERRULE_M from the ferrule, down the shaft or into the handle
-    (config.GRASP_SIDE). handle_dir points from the ferrule towards the handle."""
+def grasp_point(ferrule, handle_dir, colour=None):
+    """Where the fingers close: GRASP_FROM_FERRULE_M (or the class's override) from the ferrule, down the shaft or
+    into the handle (config.GRASP_SIDE). handle_dir points from the ferrule towards the handle."""
     sign = 1.0 if config.GRASP_SIDE == "handle" else -1.0
-    return np.asarray(ferrule, float) + sign * np.asarray(handle_dir, float) * config.GRASP_FROM_FERRULE_M
+    dist = getattr(config, "GRASP_FROM_FERRULE_BY_CLASS", {}).get(colour, config.GRASP_FROM_FERRULE_M)
+    return np.asarray(ferrule, float) + sign * np.asarray(handle_dir, float) * dist
 
 
 def on_tray(xy):
