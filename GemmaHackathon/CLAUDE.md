@@ -6,11 +6,11 @@ Hackathon project (Gemma Hardware Hackathon, Oct 24 2026). A Kinova Gen3 learns 
 
 ## Devices
 - Laptop: `main.py` FastAPI, perception, Gemma 4 E4B planner, Kortex arm control.
-- Camera: Kinova Vision module on the wrist, RTSP `rtsp://<ROBOT_IP>/color`. Eye-in-hand: call `arm.look()` before any perception frame. The old webcam reader is in `archive/webcam/` and is unused.
+- Camera: USB webcam on a stand above the table (our arm has no Kinova Vision module). `config.CAMERA` picks webcam / kinova (RTSP) / mock. Always call `arm.look()` before a perception frame: it parks the arm out of view (or at the viewing pose if `CAMERA_ON_WRIST`).
 - Raspberry Pi 5: `pi/voice_agent.py`, Gemma 4 E2B via LiteRT-LM, audio in → intent JSON.
 
 ## Without hardware
-Set `USE_MOCK_ARM = True` and `USE_MOCK_CAMERA = True` in `config.py`. Gemma still needs a backend (LiteRT model or Ollama).
+Set `USE_MOCK_ARM = True` and `CAMERA = "mock"` in `config.py`. Gemma still needs a backend (LiteRT model or Ollama).
 
 ## Hard rules
 1. Gemma never outputs coordinates. It picks numbered marks and bin A/B, and geometry is deterministic.
@@ -20,4 +20,4 @@ Set `USE_MOCK_ARM = True` and `USE_MOCK_CAMERA = True` in `config.py`. Gemma sti
 5. Safety: slow moves, `stop` interrupts immediately.
 
 ## Measured on site
-`TABLE_TAGS`, `LOOK_POSE`, `Z_GRASP`, `TOOL_ORIENT`, `GRIPPER_CLOSED`. The laptop LiteRT config (GPU text + CPU vision, `gemma-4-E4B-it.litertlm`) is verified on Windows; the Pi's audio path is not.
+`TABLE_TAGS`, `LOOK_POSE`, `Z_GRASP`, `TOOL_ORIENT`, `GRIPPER_CLOSE_SPEED`. The laptop LiteRT config (GPU text + CPU vision, `gemma-4-E4B-it.litertlm`) is verified on Windows; the Pi's audio path is not.

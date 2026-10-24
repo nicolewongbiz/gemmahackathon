@@ -4,5 +4,4 @@ uvicorn
 requests
 huggingface_hub
 # Kinova Kortex API is NOT on PyPI. Put the wheel (kortex_api-2.x.x...whl) in this folder;
-# the setup script installs it. Kortex needs an older protobuf:
-protobuf==3.20.3
+# the setup script installs it, and it pins the old protobuf it needs (2.8.0 -> protobuf 3.20.0).

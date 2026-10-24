@@ -33,13 +33,20 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-def _check_inside(x, y, z):
+def _check_inside(target, current):
+    """Each axis must end inside WORKSPACE, or, if the arm already starts outside on that axis
+    (e.g. it was jogged there from the Web App), at least not move further out, so it can recover."""
     ws = config.WORKSPACE
-    for name, val in (("x", x), ("y", y), ("z", z)):
+    for name, val, now in zip("xyz", target, current):
         lo, hi = ws[name]
-        if not lo <= val <= hi:
-            raise SafetyError(f"Target {name}={val:.3f} m is outside the workspace [{lo}, {hi}]. "
-                              "Edit WORKSPACE in config.py if this is wrong.")
+        if lo <= val <= hi:
+            continue
+        if not lo <= now <= hi and max(lo - val, val - hi) <= max(lo - now, now - hi) + 1e-6:
+            continue
+        where = (f"The arm is already at {name}={now:.3f} m, outside the box; say 'go home' first. "
+                 if not lo <= now <= hi else "")
+        raise SafetyError(f"Target {name}={val:.3f} m is outside the workspace [{lo}, {hi}]. {where}"
+                          "Edit WORKSPACE in config.py if this is wrong.")
 
 
 def validate(actions):
@@ -141,6 +148,9 @@ class Executor:
                     self._one(a)
                 self._note("done")
             except Exception as e:  # noqa: BLE001
+                if "SESSION_NOT_IN_CONTROL" in str(e):
+                    e = ("Another client has control of the arm (Kinova Web App or gamepad). "
+                         "Close the Web App tab / put the gamepad down, then restart run_real.bat.")
                 self._note(f"ERROR: {e}")
             finally:
                 self.busy = False
@@ -166,5 +176,5 @@ class Executor:
             x, y, z = a.get("x", x), a.get("y", y), a.get("z", z)
         elif t == "rotate":
             tx, ty, tz = tx + a["droll"], ty + a["dpitch"], tz + a["dyaw"]
-        _check_inside(x, y, z)
+        _check_inside((x, y, z), (p["x"], p["y"], p["z"]))
         self.arm.move_to(x, y, z, tx, ty, tz)

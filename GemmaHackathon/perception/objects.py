@@ -15,6 +15,10 @@ class ObjectFinder:
 
     def find(self, frame, ignore_mask=None):
         """Returns {id: (u, v)} pixel centroids, ids start at 1."""
+        return {i + 1: c for i, (c, _) in enumerate(self.blobs(frame, ignore_mask))}
+
+    def blobs(self, frame, ignore_mask=None):
+        """[((u, v) centroid, contour)] in reading order."""
         if self.empty is None:
             raise RuntimeError("Call snapshot_empty() with a clear table first")
         diff = cv2.absdiff(cv2.GaussianBlur(frame, (7, 7), 0), self.empty)
@@ -30,9 +34,20 @@ class ObjectFinder:
             if cv2.contourArea(c) < MIN_AREA:
                 continue
             M = cv2.moments(c)
-            objs.append((M["m10"] / M["m00"], M["m01"] / M["m00"]))
-        objs.sort(key=lambda p: (p[1] // 80, p[0]))   # reading order
-        return {i + 1: p for i, p in enumerate(objs)}
+            objs.append(((M["m10"] / M["m00"], M["m01"] / M["m00"]), c))
+        objs.sort(key=lambda o: (o[0][1] // 80, o[0][0]))   # reading order
+        return objs
+
+    def at(self, frame, u, v, ignore_mask=None, max_px=40):
+        """Centroid of the object under (or within max_px of) pixel (u, v), else None."""
+        best, best_d = None, max_px
+        for c, cnt in self.blobs(frame, ignore_mask):
+            d = -cv2.pointPolygonTest(cnt, (float(u), float(v)), True)   # <= 0 inside
+            if d <= 0:
+                return c
+            if d < best_d:
+                best, best_d = c, d
+        return best
 
 
 def draw_marks(frame, objs, bins_px=None):
