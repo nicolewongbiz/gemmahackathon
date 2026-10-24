@@ -32,6 +32,26 @@ STOP_WORDS = r"\b(stop|wait|hold|freeze|halt|pause|abort)\b"
 RELEASE_WORDS = r"\b(let go|release|got it|i'?ve got it|drop it|open (the )?gripper|take it)\b"
 
 
+YES_WORDS = r"\b(yes|yeah|yep|yup|sure|please|go ahead|do it|bring it|ok(ay)?|correct|affirmative)\b"
+NO_WORDS = r"\b(no|nope|not now|not yet|cancel|don'?t|negative|skip)\b"
+
+
+def rule_confirm(text):
+    """'yes' / 'no' from fixed keywords ('no' wins over 'yes'), else None."""
+    t = text.lower()
+    if re.search(NO_WORDS, t):
+        return "no"
+    if re.search(YES_WORDS, t):
+        return "yes"
+    return None
+
+
+def speak(text):
+    """On-device speech (macOS `say`, offline). Blocks until it has finished, so the mic doesn't hear it."""
+    if config.VOICE_SPEAK and text:
+        subprocess.run(["say", text], check=False)
+
+
 def transcribe(engine, wav):
     d = gemma.ask_json(engine, TRANSCRIBE_SYSTEM, TRANSCRIBE, audio=wav) or {}
     return str(d.get("heard", "")).strip()

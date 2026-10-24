@@ -146,3 +146,14 @@ def test_voice_keyword_rules_decide_stop_and_release():
     for said in ("pass me the clip applier", "can you check the monitor", "I need suction here"):
         assert rule_intent(said) is None, said
     assert rule_intent("wait, let go") == "stop"                                # stop always wins
+
+
+def test_confirmation_keywords():
+    from edgehand.voice_node import rule_confirm
+    for said in ("yes", "Yes please", "yeah go ahead", "okay bring it", "sure"):
+        assert rule_confirm(said) == "yes", said
+    for said in ("no", "No thanks", "not now", "cancel that", "don't"):
+        assert rule_confirm(said) == "no", said
+    assert rule_confirm("no, yes") == "no"                                      # a no always wins
+    assert rule_confirm("I know the answer") is None                             # 'know' isn't 'no'
+    assert rule_confirm("hmm let me think") is None

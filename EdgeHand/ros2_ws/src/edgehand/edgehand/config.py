@@ -181,6 +181,8 @@ SURGICAL_FEED_URL = f"http://{JETSON_HOST}:8090/stream.mjpg"
 ASSISTANT_GEMMA_GPU = True
 # Phase names Gemma may give as its own read of a frame (same words as the annotated timeline, so they compare)
 SURGICAL_PHASES = ["Brain exposure", "Parent vessel exposure", "Dome exposure", "Clipping"]
+ASSISTANT_CONFIRM = True           # speak each recommendation and fetch only on a spoken "yes" (or a named instrument)
+CONFIRM_SECONDS = 3.5              # how long it listens for the answer
 ASSISTANT_IMAGE_PX = 512             # longest side of the surgical frame Gemma sees (smaller = faster)
 
 # ---- Voice (edgehand/voice_node.py, on the laptop: its mic -> Gemma -> request over the event link) ----

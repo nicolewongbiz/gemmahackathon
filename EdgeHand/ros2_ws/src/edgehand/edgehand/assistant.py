@@ -5,8 +5,10 @@ On every phase change from the Jetson's video node (edgehand/surgical_feed.py), 
      read of the phase, so its read is independent of the annotation and the agreement shown on screen means something;
   2. decision (text only, ~1.5 s): the scene report + the annotated phase + the tray (config.INSTRUMENTS) -> the
      instrument to hand over and why. The pick goes to run_kortex --listen as
-{"type": "request", "tool", "source": "gemma-phase", ...}. Press v to talk: Gemma hears you with the same context and
-can request an instrument, stop or release (a spoken stop is a convenience; the red E-stop is the stop).
+{"type": "request", "tool", "source": "gemma-phase", ...}. With ASSISTANT_CONFIRM (default) it first SAYS the
+recommendation out loud (macOS `say`, offline) and listens: "yes" fetches it, "no" skips, "no, the suction" fetches
+that instead, so the arm never moves without a spoken yes. Press v to talk any time: request an instrument, stop or
+release (a spoken stop is a convenience; the red E-stop is the stop).
 
     python -m edgehand.assistant                                   Jetson feed (SURGICAL_FEED_URL) + phase events
     python -m edgehand.assistant --local ~/Desktop/clippingdemo.mp4 ../../../data/phases/clippingdemo.csv    no Jetson
@@ -107,8 +109,8 @@ def parse_voice(d):
 
 
 class Assistant:
-    def __init__(self, send=True, arm_host="127.0.0.1"):
-        self.send, self.arm_host = send, arm_host
+    def __init__(self, send=True, arm_host="127.0.0.1", confirm=config.ASSISTANT_CONFIRM):
+        self.send, self.arm_host, self.confirm = send, arm_host, confirm
         self.engine = gemma.make_engine(config.GEMMA_MODEL, vision=True, audio=True, gpu=config.ASSISTANT_GEMMA_GPU)
         self.system = SYSTEM.format(tray=tray_text())
         self.colours = "|".join(c for c, _, _ in config.INSTRUMENTS.values())
@@ -167,13 +169,50 @@ class Assistant:
                   f"{config.INSTRUMENTS[r['tool']][1] if r['tool'] else '-'}: {r['reason']} "
                   f"({r['scene_seconds']:.1f} + {r['seconds'] - r['scene_seconds']:.1f} s; agrees "
                   f"{self.agree}/{self.compared})", flush=True)
-            if r["tool"]:
+            if r["tool"] and self.confirm:
+                self._confirm(r, ph)
+            elif r["tool"]:
                 self._request(r["tool"], "gemma-phase", phase=ph["phase"], reason=r["reason"])
             else:
                 self.status = "Gemma didn't pick an instrument on the tray"
         finally:
             self.busy.release()
             self._maybe_decide()                # a phase that changed while Gemma was busy is next
+
+    def _confirm(self, r, ph):
+        """Say the recommendation, listen, act on the answer. Runs inside the busy lock (one Gemma job at a time)."""
+        from edgehand.voice_node import record, rule_confirm, rule_intent, speak, transcribe
+        colour, role, _ = config.INSTRUMENTS[r["tool"]]
+        question = f"{ph['phase']}. Shall I bring the {colour} {role}?"
+        self.status = f'asking: "{question}"  (yes / no / another instrument)'
+        speak(question)
+        wav = self.dir / "answer.wav"
+        self.status = f"listening for your answer ({config.CONFIRM_SECONDS:.0f} s)..."
+        record(wav, config.CONFIRM_SECONDS)
+        heard = transcribe(self.engine, wav)
+        fixed, answer = rule_intent(heard), rule_confirm(heard)
+        print(f"  confirm: heard {heard!r}", flush=True)
+        if fixed:                                           # stop / release, as always
+            if self.send:
+                link.send({"type": fixed, "source": "voice"}, self.arm_host)
+            self.status = f"heard {heard!r}: {fixed}"
+            return
+        named = None
+        if not (answer and len(heard.split()) <= 3):        # more than a yes/no: did they name an instrument?
+            v = parse_voice(dict(gemma.ask_json(self.engine, self.system, VOICE.format(
+                phase=ph["phase"], heard=heard, colours=self.colours)) or {}, heard=heard))
+            named = v["tool"] if v["intent"] == "request" else None
+        if named and named != r["tool"]:
+            self._request(named, "voice", phase=ph["phase"], reason=f"surgeon chose it over the {role}")
+            speak(f"Bringing the {config.INSTRUMENTS[named][1]} instead.")
+        elif answer == "yes" or named == r["tool"]:
+            self._request(r["tool"], "gemma-phase", phase=ph["phase"], reason=r["reason"])
+            speak(f"Bringing the {role}.")
+        elif answer == "no":
+            self.status = f"heard {heard!r}: not bringing the {role}"
+            speak("Okay.")
+        else:
+            self.status = f"heard {heard!r}: no clear yes; press v to ask for an instrument"
 
     def _request(self, tool, source, **extra):
         role = config.INSTRUMENTS[tool][1]
@@ -267,10 +306,11 @@ def main():
     ap.add_argument("--feed", default=config.SURGICAL_FEED_URL)
     ap.add_argument("--dry-run", action="store_true", help="decide and show, send nothing to the arm")
     ap.add_argument("--no-window", action="store_true")
+    ap.add_argument("--no-confirm", action="store_true", help="fetch Gemma's pick without asking")
     ap.add_argument("--speed", type=float, default=1.0, help="with --local")
     ap.add_argument("--loop", action="store_true", help="with --local")
     a = ap.parse_args()
-    asst = Assistant(send=not a.dry_run)
+    asst = Assistant(send=not a.dry_run, confirm=not a.no_confirm and config.ASSISTANT_CONFIRM)
     listener = None
     if a.local:
         from edgehand.surgical_feed import Feed
