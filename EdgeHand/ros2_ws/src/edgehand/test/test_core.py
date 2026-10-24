@@ -127,12 +127,63 @@ def test_marked_image_crops_to_the_tools():
     assert 0 < out.shape[0] < img.shape[0] and 0 < out.shape[1] < img.shape[1]
 
 
-def test_not_calibrated_without_all_tags():
-    tags = dict(config.TABLE_TAGS)
-    tags.pop(2)
-    img = synthetic.frame([("phillips", (0.45, 0.0), (0, 1))], tag_xy=tags)
+def _tags_without(*hidden):
+    return {i: xy for i, xy in config.TABLE_TAGS.items() if i not in hidden}
+
+
+@pytest.mark.parametrize("hidden", [(2,), (0,), (1, 2), (0, 2)])     # one tag; two side by side; two diagonal
+@pytest.mark.parametrize("yaw", [0.0, 0.5])                           # tags taped square, or crooked
+def test_calibrates_from_two_or_three_tags(hidden, yaw):
+    g, d = (0.47, 0.03), np.array([0.6, 0.8])
+    img = synthetic.frame([("phillips", g, d)], tag_xy=_tags_without(*hidden), tag_yaw=yaw)
     tm = TableMap()
-    assert not tm.update(img) and find_tools(img, tm) == []
+    assert tm.update(img) and tm.calibrated_from == "live" and tm.tags_used == 4 - len(hidden)
+    t = detect_tools(img, tm)[0]
+    assert np.linalg.norm(t["grasp_xy"] - g) < 0.006 and t["handle_dir"] @ d > 0.99
+
+
+def test_not_calibrated_from_one_tag():
+    img = synthetic.frame([("phillips", (0.45, 0.0), (0, 1))], tag_xy=_tags_without(1, 2, 3))
+    tm = TableMap()
+    assert not tm.update(img) and tm.calibrated_from is None and find_tools(img, tm) == []
+
+
+def test_reuses_the_last_fit_when_tags_are_hidden():
+    g, d = (0.45, -0.05), np.array([0.0, 1.0])
+    tm = TableMap()
+    assert tm.update(synthetic.frame([])) and tm.calibrated_from == "live"
+    img = synthetic.frame([("torx", g, d)], tag_xy=_tags_without(0, 1, 2))      # tools and arm hide 3 tags
+    assert tm.update(img) and tm.calibrated_from == "cached"
+    t = detect_tools(img, tm)[0]
+    assert np.linalg.norm(t["grasp_xy"] - g) < 0.006
+    assert tm.update(synthetic.frame([])) and tm.calibrated_from == "live"     # back to live once they're visible
+
+
+def test_leaves_out_a_tag_that_doesnt_match_table_tags(monkeypatch):
+    # tag 2 lies 10 cm from where TABLE_TAGS says: its corners can't line up with the others, so it's left out
+    g = (0.47, 0.03)
+    img = synthetic.frame([("phillips", g, (0, 1))])
+    monkeypatch.setitem(config.TABLE_TAGS, 2, (0.70, 0.20))
+    tm = TableMap()
+    assert tm.update(img) and tm.bad_tag == 2 and tm.tags_used == 3
+    assert np.linalg.norm(detect_tools(img, tm)[0]["grasp_xy"] - g) < 0.006
+
+
+def test_refuses_to_calibrate_when_table_tags_are_all_wrong(monkeypatch):
+    # TABLE_TAGS from a different table (tags really 0.3 m apart, configured 0.25 x 0.4): no fit rather than a skewed one
+    img = synthetic.frame([], tag_xy={0: (0.35, -0.15), 1: (0.35, 0.15), 2: (0.65, 0.15), 3: (0.65, -0.15)})
+    tm = TableMap()
+    assert tm.update(synthetic.frame([]))                                   # a good fit first...
+    assert not tm.update(img) and tm.calibrated_from is None               # ...doesn't cover tags that moved
+    assert "re-measure" in tm.why_not()
+
+
+def test_ignores_clutter_beyond_the_tags():
+    # a "tool" with its grasp point well outside the tag rectangle (cables, a game controller on the desk)
+    img = synthetic.frame([("phillips", (0.45, 0.0), (0, 1)), ("flathead", (0.45, -0.34), (0, -1))])
+    tm = TableMap()
+    tm.update(img)
+    assert [t["colour"] for t in find_tools(img, tm)] == ["phillips"]
 
 
 # ---- handover state machine ----
@@ -216,6 +267,20 @@ def test_tilted_table_plane_from_fingertip_touches(monkeypatch):
         assert Handover(r, log=lambda *a: None).run((x, 0.0), (0, 1))[0]
         p, R = r.poses[r.slow[0]]
         assert np.isclose(p[2] - d - table_z(x, 0.0), config.TABLE_CLEARANCE_M)   # follows the tilt
+
+
+def test_touch_heights_that_disagree_are_refused(monkeypatch):
+    d = config.FINGERTIP_CLOSED_M
+    good = {i: d + 0.002 * i for i in config.TABLE_TAGS}                  # within 6 mm: fine
+    monkeypatch.setattr(config, "TABLE_TOUCH_Z", good)
+    assert Handover(FakeRobot(tug_after=3.0), log=lambda *a: None).run((0.45, 0.0), (0, 1))[0]
+    typo = {**good, 3: d + 0.4}                                           # 0.573 typed instead of 0.173
+    monkeypatch.setattr(config, "TABLE_TOUCH_Z", typo)
+    r = FakeRobot()
+    ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))
+    assert not ok and "re-measure" in msg and r.calls == []               # refused before any motion
+    monkeypatch.setattr(config, "TABLE_TOUCH_Z", {0: d, 1: d, 9: d})      # a tag that isn't in TABLE_TAGS
+    assert "aren't in TABLE_TAGS" in Handover(FakeRobot(), log=lambda *a: None).run((0.45, 0.0), (0, 1))[1]
 
 
 def test_air_gap_raises_every_grasp_and_skips_the_grasp_check(monkeypatch):

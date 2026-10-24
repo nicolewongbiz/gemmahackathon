@@ -1,6 +1,7 @@
-"""Overhead camera -> where each tool is and where to grasp it.
+"""Wrist camera at the look pose -> where each tool is and where to grasp it.
 
-Calibration: 4 AprilTags (tag36h11) at measured base-frame positions -> pixel->table homography.
+Calibration: AprilTags (tag36h11) at measured base-frame positions -> pixel->table homography (TableMap: any 2 of the
+4 tags will do, and the last good fit covers frames where they're hidden).
 Detection: tools on a dark mat. A colourful grip with a grey, unsaturated part sticking out of one end = a tool; the
 grey part is the shaft. Naming is separate: by handle colour (config.TOOLS) or by Gemma (namer.py). The grasp point is on the SHAFT, GRASP_FROM_FERRULE_M from the handle, so the robot can
 present the handle to the operator.
@@ -19,21 +20,112 @@ def detect_tags(frame):
     return {} if ids is None else {int(i): c.reshape(4, 2) for i, c in zip(ids.ravel(), corners)}
 
 
+def _square():
+    """A tag's 4 corners in the order ArUco reports them (clockwise from the printed top-left), for a tag lying face
+    up, relative to its centre. The tag's yaw on the table is fitted, so tags can be taped down at any angle."""
+    return np.array([(-1, 1), (1, 1), (1, -1), (-1, -1)]) * config.TAG_SIZE_M / 2
+
+
+def _to_3x3(A):
+    return np.vstack([A, [0, 0, 1]]) if A.shape == (2, 3) else A
+
+
+def _apply(H, pts):
+    p = np.c_[pts, np.ones(len(pts))] @ H.T
+    return p[:, :2] / p[:, 2:]
+
+
+def _signed_area(pts):
+    x, y = pts[:, 0], pts[:, 1]
+    return 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+
+
 class TableMap:
+    """Pixel <-> table (base frame x, y) from the AprilTags in view.
+
+    Every visible TABLE_TAGS tag gives 5 points (4 corners + centre), so CALIB_MIN_TAGS tags are enough when a tool or
+    the arm hides the others. A tag's corners on the table are a TAG_SIZE_M square around its measured centre, turned
+    by the tag's yaw as seen through a rough fit on the centres alone. The camera always looks from the same look pose,
+    so with too few tags the last good fit is reused: calibrated_from says "live", "cached" or None."""
     def __init__(self):
         self.H = None
         self.tags = {}
+        self.calibrated_from = None
+        self.tags_used = 0
+        self.bad_tag = None             # a visible tag left out because it disagrees with the others
+        self.fit_err = np.inf           # worst tag-corner mismatch of the last fit (m)
+        self._last_good = None
 
     def update(self, frame):
         self.tags = detect_tags(frame)
         ids = [i for i in config.TABLE_TAGS if i in self.tags]
-        if len(ids) == len(config.TABLE_TAGS) >= 4:
-            src = np.array([self.tags[i].mean(axis=0) for i in ids], np.float32)
-            dst = np.array([config.TABLE_TAGS[i] for i in ids], np.float32)
-            self.H, _ = cv2.findHomography(src, dst)
+        H, err = self._fit(ids)
+        self.bad_tag = None
+        if H is None and len(ids) > config.CALIB_MIN_TAGS:
+            # one tag that disagrees with the rest (moved, or mis-measured in TABLE_TAGS): the best fit without it, if
+            # that one lines up, and say which tag it was
+            fits = [(self._fit([i for i in ids if i != bad]), bad) for bad in ids]
+            (H, err), bad = min(fits, key=lambda f: f[0][1])
+            if H is not None:
+                self.bad_tag, ids = bad, [i for i in ids if i != bad]
+        self.fit_err = err
+        if H is not None:
+            self.H, self._last_good, self.calibrated_from, self.tags_used = H, H, "live", len(ids)
+        elif self._last_good is not None and len(ids) < config.CALIB_MIN_TAGS:
+            # tags hidden (tools, the arm), not moved: same look pose, so the last fit still holds. Tags that are
+            # visible but disagree mean something moved, so they never fall back to the cache.
+            self.H, self.calibrated_from, self.tags_used = self._last_good, "cached", 0
         else:
-            self.H = None
+            self.H, self.calibrated_from, self.tags_used = None, None, 0
         return self.H is not None
+
+    def why_not(self):
+        """Why the last update() didn't calibrate, in words for the window and vision_node's reply."""
+        seen = [i for i in config.TABLE_TAGS if i in self.tags]
+        if len(seen) < config.CALIB_MIN_TAGS:
+            return f"see tags {seen}, need {config.CALIB_MIN_TAGS} of {list(config.TABLE_TAGS)}"
+        return (f"tags {seen} don't match TABLE_TAGS (corners off by {self.fit_err * 1000:.0f} mm): "
+                f"re-measure them (python -m edgehand.measure_tags)")
+
+    def _rough(self, ids):
+        """Centres-only fit: homography (4+ tags), affine (3) or similarity (2). Two points fit a similarity with
+        or without a mirror flip; a face-up tag's corners must come out clockwise, which picks one."""
+        src = np.float32([self.tags[i].mean(axis=0) for i in ids])
+        dst = np.float32([config.TABLE_TAGS[i] for i in ids])
+        if len(ids) >= 4:
+            return cv2.findHomography(src, dst)[0]
+        if len(ids) == 3:
+            return _to_3x3(cv2.getAffineTransform(src, dst))
+        for flip in (1, -1):
+            s = src * [1, flip]
+            a = complex(*(dst[1] - dst[0])) / complex(*(s[1] - s[0]))       # rotation + scale as a complex number
+            b = complex(*dst[0]) - a * complex(*s[0])
+            M = np.array([[a.real, -a.imag, b.real], [a.imag, a.real, b.imag], [0, 0, 1]]) @ np.diag([1, flip, 1])
+            if _signed_area(_apply(M, self.tags[ids[0]])) < 0:
+                return M
+        return None
+
+    def _fit(self, ids):
+        """(H, worst corner error in metres), or (None, error) if it doesn't line up / (None, inf) if it can't fit."""
+        if len(ids) < config.CALIB_MIN_TAGS:
+            return None, np.inf
+        rough = self._rough(ids)
+        if rough is None:
+            return None, np.inf
+        sq, src, dst = _square(), [], []
+        for i in ids:
+            c = np.array(config.TABLE_TAGS[i], float)
+            seen = _apply(rough, self.tags[i]) - c                       # this tag's corners on the table, roughly
+            yaw = np.arctan2(np.sum(sq[:, 0] * seen[:, 1] - sq[:, 1] * seen[:, 0]), np.sum(sq * seen))
+            R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
+            src += [*self.tags[i], self.tags[i].mean(axis=0)]
+            dst += [*(c + sq @ R.T), c]
+        H = cv2.findHomography(np.float32(src), np.float32(dst))[0]
+        if H is None:
+            return None, np.inf
+        # corners that don't line up = a misread tag or a wrong TABLE_TAGS entry: don't trust the fit
+        err = float(np.linalg.norm(_apply(H, np.array(src)) - np.array(dst), axis=1).max())
+        return (H if err < config.CALIB_MAX_ERR_M else None), err
 
     def px_to_table(self, u, v):
         p = self.H @ np.array([u, v, 1.0])
@@ -93,9 +185,18 @@ def find_tools(frame, tmap):
         d = handle - ferrule
         d /= np.linalg.norm(d)
         grasp = ferrule - d * config.GRASP_FROM_FERRULE_M
+        if not on_tray(grasp):
+            continue                                              # desk clutter beyond the tags (cables, etc.)
         out.append({"grasp_xy": grasp, "handle_dir": d, "grasp_px": tmap.table_to_px(*grasp), "handle_px": centre,
                     "area": area, "contour": c, "colour": colour_class(hsv, c)})
     return sorted(out, key=lambda t: -t["area"])
+
+
+def on_tray(xy):
+    """Inside the rectangle through the TABLE_TAGS centres, plus TRAY_MARGIN_M."""
+    xs, ys = zip(*config.TABLE_TAGS.values())
+    m = config.TRAY_MARGIN_M
+    return min(xs) - m <= xy[0] <= max(xs) + m and min(ys) - m <= xy[1] <= max(ys) + m
 
 
 def _grip_contours(hsv, ignore):
@@ -150,6 +251,10 @@ def draw(frame, tmap, tools):
         cv2.circle(out, g, 8, (0, 0, 255), -1)
         cv2.putText(out, f"{t.get('tool') or '?'} {t['grasp_xy'][0]:.3f},{t['grasp_xy'][1]:.3f}", (g[0] + 10, g[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    cv2.putText(out, "CALIBRATED" if tmap.H is not None else "NOT CALIBRATED: need tags " + str(list(config.TABLE_TAGS)),
-                (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0) if tmap.H is not None else (0, 0, 255), 2)
+    bad = f", tag {tmap.bad_tag} doesn't match TABLE_TAGS" if tmap.bad_tag is not None else ""
+    status = (f"CALIBRATED (live, {tmap.tags_used} tags{bad})" if tmap.calibrated_from == "live" else
+              "CALIBRATED (cached: tags hidden)" if tmap.calibrated_from == "cached" else
+              "NOT CALIBRATED: " + tmap.why_not())
+    cv2.putText(out, status, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                (0, 255, 0) if tmap.calibrated_from == "live" else (0, 200, 255) if tmap.H is not None else (0, 0, 255), 2)
     return out

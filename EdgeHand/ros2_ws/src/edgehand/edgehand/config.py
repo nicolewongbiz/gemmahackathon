@@ -54,12 +54,19 @@ TABLE_TAGS = {                     # tag36h11 id -> tag centre (x, y). MEASURE O
     3: (0.60, -0.20),
 }
 TAG_SIZE_M = 0.05
-TABLE_Z = 0.0                      # table surface height in the base frame (used only while TABLE_TOUCH_Z is empty)
+CALIB_MIN_TAGS = 2                 # visible TABLE_TAGS needed to calibrate (fewer: reuse the last good fit)
+# Worst tag-corner mismatch a fit may have. Right TABLE_TAGS: ~0.6 mm. One tag 3 cm off: 5 mm. Tags 0.3 m apart
+# configured as 0.25 x 0.4 m: 10 mm. Above this the tags don't agree with TABLE_TAGS, so don't calibrate.
+CALIB_MAX_ERR_M = 0.004
+TRAY_MARGIN_M = 0.02               # tools are only looked for within the tag rectangle plus this (desk clutter beyond)
+TABLE_Z = 0.0                     # table surface height in the base frame (used only while TABLE_TOUCH_Z is empty)
 # How the table height is really set (README Phase 1.6): close the gripper, point it straight down, jog until the
 # fingertips just pinch a sheet of paper on each tag, and read the flange z (tf2_echo base_link end_effector_link).
 # A plane through these 4 heights replaces TABLE_Z: it follows a tilted table, and since the same arm measured it,
 # ruler error in FINGERTIP_CLOSED_M and the arm's own z offset cancel out of the grasp height.
 TABLE_TOUCH_Z = {}                 # tag id -> flange z (m) with the closed fingertips touching the mat there
+TOUCH_SPREAD_MAX_M = 0.02          # touch heights further apart than this, or a plane tilted more than this, are
+TABLE_TILT_MAX_DEG = 3.0           # refused (a typo would move the table plane under the clearance check)
 SHAFT_MIN_VAL = 140                # shaft = bright (HSV V) and unsaturated; a lit dark mat stays below this
 TOOL_MIN_AREA_PX = 800             # smaller blobs are noise
 SHAFT_MAX_SAT = 70                 # shaft = low saturation (metal); handle = its TOOLS colour

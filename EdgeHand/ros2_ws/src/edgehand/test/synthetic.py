@@ -20,18 +20,21 @@ def to_px(Hc, x, y):
     return p[:2] / p[2]
 
 
-def frame(tools, tag_xy=None):
-    """tools: list of (name, grasp_xy, handle_dir). Returns BGR image."""
+def frame(tools, tag_xy=None, tag_yaw=0.0):
+    """tools: list of (name, grasp_xy, handle_dir). tag_yaw: radians each tag is turned on the table, taped down
+    crooked. Returns BGR image."""
     Hc = camera_H()
     img = np.full((H, W, 3), 25, np.uint8)
     half = config.TAG_SIZE_M / 2
+    c, s = np.cos(tag_yaw), np.sin(tag_yaw)
     for tid, (x, y) in (tag_xy or config.TABLE_TAGS).items():
         marker = cv2.aruco.generateImageMarker(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11), tid, 80)
         marker = cv2.copyMakeBorder(marker, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
         q = half * 10 / 8
         src = np.float32([[0, 0], [100, 0], [100, 100], [0, 100]])
-        # tag image top edge faces +x (away from the arm)
-        dst = np.float32([to_px(Hc, x + q, y + q), to_px(Hc, x + q, y - q), to_px(Hc, x - q, y - q), to_px(Hc, x - q, y + q)])
+        # tag image top edge faces +x (away from the arm), then turned by tag_yaw
+        offs = [(q, q), (q, -q), (-q, -q), (-q, q)]
+        dst = np.float32([to_px(Hc, x + c * dx - s * dy, y + s * dx + c * dy) for dx, dy in offs])
         warped = cv2.warpPerspective(cv2.cvtColor(marker, cv2.COLOR_GRAY2BGR), cv2.getPerspectiveTransform(src, dst), (W, H))
         mask = cv2.warpPerspective(np.full((100, 100), 255, np.uint8), cv2.getPerspectiveTransform(src, dst), (W, H))
         img[mask > 0] = warped[mask > 0]

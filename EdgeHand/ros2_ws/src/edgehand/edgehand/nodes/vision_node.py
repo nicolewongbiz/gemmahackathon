@@ -49,7 +49,7 @@ class VisionNode(Node):
         if self.namer_kind == "gemma":
             from edgehand.namer import GemmaNamer
             self.namer = GemmaNamer()
-        self.tmap = TableMap()
+        self.tmap, self.show_tmap = TableMap(), TableMap()
         self.frame, self.frame_n = None, 0          # latest frame and a counter, to wait for one taken after a locate
         self.frame_cv = threading.Condition()
         self.busy = threading.Lock()
@@ -76,7 +76,7 @@ class VisionNode(Node):
             self.frame, self.frame_n = frame, self.frame_n + 1
             self.frame_cv.notify_all()
         if self.show:                                # unnamed outlines; naming only happens on a locate
-            tm = TableMap()
+            tm = self.show_tmap                      # its own map: on_frame and _locate run on different threads
             tools = find_tools(frame, tm) if tm.update(frame) else []
             if self.clicks and tm.H is not None:
                 print("pixel", self.clicks[-1], "-> table", np.round(tm.px_to_table(*self.clicks.pop()), 4))
@@ -99,15 +99,17 @@ class VisionNode(Node):
                     return
                 frame = self.frame
             if not self.tmap.update(frame):
-                self._reply(req, False, note="can't see all four table tags")
+                self._reply(req, False, note="not calibrated: " + self.tmap.why_not())
                 return
             tools = find_tools(frame, self.tmap)
             names = self.namer.name(frame, tools) if self.namer else [t["colour"] for t in tools]
             for t, n in zip(tools, names):
                 t["tool"] = n
-            self.det_pub.publish(String(data=json.dumps([
-                {"tool": t["tool"], "grasp_xy": [round(float(v), 4) for v in t["grasp_xy"]],
-                 "handle_dir": [round(float(v), 3) for v in t["handle_dir"]]} for t in tools])))
+            self.det_pub.publish(String(data=json.dumps({
+                "calibrated_from": self.tmap.calibrated_from, "tags_used": self.tmap.tags_used,
+                "bad_tag": self.tmap.bad_tag,
+                "tools": [{"tool": t["tool"], "grasp_xy": [round(float(v), 4) for v in t["grasp_xy"]],
+                           "handle_dir": [round(float(v), 3) for v in t["handle_dir"]]} for t in tools]})))
             seen = [t["tool"] or "unknown" for t in tools]
             self.get_logger().info(f"locate {req}: saw {seen}")
             match = [t for t in tools if t["tool"] == req["tool"]]
