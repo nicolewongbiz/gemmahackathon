@@ -106,13 +106,32 @@ def test_execute_waits_through_the_state_flicker_after_a_move(monkeypatch):
     assert r._execute(B.Action()) is True and len(base.executed) == 1
 
 
-def test_execute_refuses_when_the_arm_stays_held(monkeypatch):
+def test_execute_proceeds_while_the_controller_reports_manual_control(monkeypatch):
+    # after a gripper command Kortex reports MANUALLY_CONTROLLED / PLAYING_SEQUENCE yet takes the next action
     B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
-    monkeypatch.setattr(config, "KORTEX_READY_WAIT_S", 0.0)
     base = FakeBase(B, stale=False)
     base.states = [B.ARMSTATE_SERVOING_MANUALLY_CONTROLLED] * 50
     r = _robot_with_base(base)
+    assert r._execute(B.Action()) is True and len(base.executed) == 1
+
+
+def test_execute_refuses_a_faulted_arm():
+    B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
+    base = FakeBase(B, stale=False)
+    base.states = [B.ARMSTATE_IN_FAULT] * 50
+    r = _robot_with_base(base)
     assert r._execute(B.Action()) is False and base.executed == []
+
+
+def test_gripper_goes_out_as_an_action():
+    B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
+    base = FakeBase(B, stale=False)
+    r = _robot_with_base(base)
+    r.grip_position = lambda: 0.7
+    assert KortexRobot.gripper(r, config.GRIPPER_CLOSED) is True
+    a = base.executed[0]
+    assert a.send_gripper_command.gripper.finger[0].value == pytest.approx(1.0)
+    assert a.send_gripper_command.mode == B.GRIPPER_POSITION
 
 
 def test_near_joint_limit_spots_the_folded_arm():

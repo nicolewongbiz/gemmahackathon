@@ -155,8 +155,12 @@ class KortexRobot:
                     return
                 result["event"], result["why"] = ev, why
                 done.set()
-        state = self._wait_ready(config.KORTEX_READY_WAIT_S)
-        if state != B.ARMSTATE_SERVOING_READY:
+        # Only a fault (or an arm still initialising) blocks an action. Gripper commands leave the controller
+        # reporting MANUALLY_CONTROLLED / PLAYING_SEQUENCE for a while, and Kortex still takes the next action then;
+        # a refused action reports ABORT with a reason, which is handled below.
+        state = self.base.GetArmState().active_state
+        if state in (B.ARMSTATE_IN_FAULT, B.ARMSTATE_UNSPECIFIED, B.ARMSTATE_BASE_INITIALIZATION,
+                     B.ARMSTATE_INITIALIZATION, B.ARMSTATE_MAINTENANCE):
             self.log(f"kortex: not moving, arm state is {B.ArmState.Name(state)}. {self._state_hint(state)}")
             return False
         h = self.base.OnNotificationActionTopic(cb, B.NotificationOptions())
@@ -179,7 +183,6 @@ class KortexRobot:
             state = self._wait_ready(1.0)
             self.log(f"kortex: move aborted ({why}); arm state {B.ArmState.Name(state)}. {self._state_hint(state)}")
             return False
-        self._wait_ready(config.KORTEX_READY_WAIT_S)      # the state flickers (MANUALLY_CONTROLLED) right after a move
         return True
 
     def _wait_ready(self, timeout_s):
@@ -195,8 +198,8 @@ class KortexRobot:
     def _state_hint(self, state):
         B = self.B
         if state in (B.ARMSTATE_SERVOING_MANUALLY_CONTROLLED, B.ARMSTATE_SERVOING_PLAYING_SEQUENCE):
-            return ("Something else holds the arm: the Web App's jog/pose panel or a gamepad. Leave that panel "
-                    "(dashboard page) or unplug the gamepad, then retry. (A refused reach shows as INVALID_PARAM.)")
+            return ("The controller reports another command in progress: a gripper command just sent, the Web App's "
+                    "jog panel, or a gamepad.")
         if state == B.ARMSTATE_IN_FAULT:
             return "Clear the fault in the Web App (or the E-stop is pressed)."
         return "Wait for the current action to finish, or stop it in the Web App."
@@ -251,13 +254,17 @@ class KortexRobot:
         return self._reach(p, R, v)
 
     def gripper(self, pos):
+        """Sent as a Kortex ACTION (start/end events) rather than SendGripperCommand, which left the controller in
+        MANUALLY_CONTROLLED. Then wait until the fingers stop moving (they stall early on a tool)."""
         B = self.B
-        cmd = B.GripperCommand()
-        cmd.mode = B.GRIPPER_POSITION
-        f = cmd.gripper.finger.add()
+        a = B.Action()
+        a.name = "edgehand gripper"
+        a.send_gripper_command.mode = B.GRIPPER_POSITION
+        f = a.send_gripper_command.gripper.finger.add()
         f.finger_identifier, f.value = 1, float(np.clip(pos / config.GRIPPER_CLOSED, 0.0, 1.0))
-        self.base.SendGripperCommand(cmd)
-        # wait until the fingers stop moving (they stall early on a tool): same position for 0.3 s, 4 s at most
+        if not self._execute(a):
+            return False
+        # same position for 0.3 s, 4 s at most
         last, still, t0 = None, 0.0, time.time()
         while time.time() - t0 < 4.0:
             time.sleep(0.05)
