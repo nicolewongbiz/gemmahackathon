@@ -6,6 +6,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONPATH="$PWD:$PWD/test:${PYTHONPATH:-}"
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-77}
+export EDGEHAND_CALIBRATION=none      # fake_cell draws config.py's tags, not the real cell's data/calibration.json
 PY=${PYTHON:-python3}
 LOG=$(mktemp -d)
 pids=()
