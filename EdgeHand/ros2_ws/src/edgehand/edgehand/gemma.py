@@ -3,17 +3,19 @@ import json, re
 from edgehand import config
 
 
-def make_engine(model, vision=False, max_images=1, audio=False):
+def make_engine(model, vision=False, max_images=1, audio=False, gpu=None):
+    """gpu: None = config.GEMMA_USE_GPU. Only one process should use the GPU backend at a time."""
     import litert_lm
     B = litert_lm.Backend
     # newer litert-lm wants Backend instances (GPU()), older ones take the enum value
-    gpu, cpu = (b() if callable(b) else b for b in (B.GPU, B.CPU))
+    gpu_b, cpu = (b() if callable(b) else b for b in (B.GPU, B.CPU))
     # GPU text + CPU vision was the fastest combination on the RTX 4070 (GemmaHackathon/planner/gemma_vision.py)
     kw = {"vision_backend": cpu, "max_num_images": max_images} if vision else {}
     if audio:
         kw["audio_backend"] = cpu                 # as in GemmaHackathon/pi/voice_agent.py
     try:
-        return litert_lm.Engine(model, backend=gpu if config.GEMMA_USE_GPU else cpu, **kw)
+        use_gpu = config.GEMMA_USE_GPU if gpu is None else gpu
+        return litert_lm.Engine(model, backend=gpu_b if use_gpu else cpu, **kw)
     except Exception:
         return litert_lm.Engine(model, backend=cpu, **kw)
 

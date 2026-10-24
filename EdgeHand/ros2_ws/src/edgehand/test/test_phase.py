@@ -96,3 +96,33 @@ def test_voice_parse_whitelists():
     assert parse({"intent": "stop"})["intent"] == "stop"
     assert parse({"intent": "fly"})["intent"] == "none"
     assert parse(None)["intent"] == "none"
+
+
+def test_assistant_parsing_whitelists_colours():
+    from edgehand.assistant import parse_decision, parse_voice
+    d = parse_decision({"visible": "3", "seen": ["forceps", "clip applier"], "colour": "Green", "reason": "clipping"})
+    assert d["tool"] == "torx" and d["visible"] == 3 and d["seen"] == "forceps, clip applier"
+    assert parse_decision({"colour": "purple"})["tool"] is None                   # not on the tray
+    assert parse_decision(None)["tool"] is None and parse_decision({"visible": "many"})["visible"] is None
+    assert parse_voice({"intent": "request", "colour": "orange"})["tool"] == "phillips"
+    assert parse_voice({"intent": "request", "colour": "purple"})["intent"] == "none"
+    assert parse_voice({"intent": "release"})["intent"] == "release"
+
+
+def test_feed_emits_phase_changes_on_time(tmp_path):
+    import cv2, numpy as np
+    from edgehand.surgical_feed import Feed
+    video = tmp_path / "clip.mp4"
+    vw = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 20, (64, 48))
+    for i in range(40):                                                         # 2 s of video
+        vw.write(np.full((48, 64, 3), i * 5, np.uint8))
+    vw.release()
+    got, frames = [], []
+    feed = Feed(str(video), write(tmp_path, [(0, "Exposure"), (1, "Clipping")]), on_frame=frames.append,
+                on_phase=lambda m: got.append(m) if m["type"] == "phase" else None, speed=2.0)
+    t0 = time.time()
+    while feed._run and time.time() - t0 < 5:
+        time.sleep(0.05)
+    assert [m["phase"] for m in got] == ["Exposure", "Clipping"]
+    assert got[1]["prev"] == "Exposure" and 0.9 <= got[1]["clip_t"] <= 1.3 and got[1]["seq"] == 2
+    assert frames and frames[0][:2] == b"\xff\xd8"                               # JPEG frames for the MJPEG stream

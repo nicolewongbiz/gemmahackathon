@@ -265,6 +265,26 @@ mkdir -p ~/edgehand-models   # copy gemma-4-E4B-it.litertlm here (3.7 GB, ~2 min
 ```
 LiteRT-LM's aarch64 `liblitert-lm.so` loads, with CPU, GPU and NPU backends listed. Session 38's `cam_relay.py` serves the RealSense colour stream from the Jetson on :8089 (`CAMERA_SOURCE = "url"`), because macOS gives only one of the D435's two video functions (infrared or colour) per plug-in.
 
+### 3.4 The surgical assistant demo (Jetson video → Gemma on the laptop → arm)
+```
+Jetson: surgical_feed.py                    Laptop: assistant.py (Gemma 4 E4B, LiteRT-LM, GPU)       run_kortex --listen
+ clip plays as the "microscope camera"  ──►  frame + phase + tray, one Gemma call:                ──► fetches the instrument
+ MJPEG :8090, phase events -> :5007          "sees 3 instruments: forceps, clip applier, ..."
+ (hand-annotated timeline)                   -> green clip applier: "clipping phase needs ..."
+```
+- **Stand-ins** (`INSTRUMENTS`): green = clip applier, orange cap = suction, yellow collar = bipolar forceps, clear blue = micro-dissector.
+- **What's live and what isn't:** the phase is the hand-annotated timeline, because the phase model's weights aren't available, and the screen says so. What Gemma sees in the frame, its choice and its reason are live inference.
+- **Voice:** press **v** in the assistant window. Gemma hears you with the phase as context and can request an instrument, stop or release.
+- **GPU:** during the demo the assistant owns the laptop GPU, and run_kortex names tray tools by colour (`--namer colour`). Only one LiteRT GPU process runs at a time.
+- **Measured** on the clip through the Jetson: 6.4–8.3 s per decision on the GPU (16–26 s on the CPU). All five phase changes were decided, with picks blue micro-dissector, then green clip applier, then blue, then green.
+```bash
+ssh nicole@192.168.55.1 '~/edgehand-demo/start_feed.sh'            # Jetson: deploy/jetson_start_feed.sh (loops; --speed 0.5 to slow)
+python -m edgehand.run_kortex --listen --namer colour               # laptop, terminal 1 (the arm)
+python -m edgehand.assistant                                         # laptop, terminal 2 (the stage screen)
+python -m edgehand.assistant --local ~/Desktop/clippingdemo.mp4 ../../../data/phases/clippingdemo.csv   # no Jetson
+```
+Requests that arrive during a handover are dropped by run_kortex, so a 67 s clip fits one or two handovers. Slow it with `--speed`, or loop it.
+
 ## 5. Settings
 
 Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
