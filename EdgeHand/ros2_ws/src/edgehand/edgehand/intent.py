@@ -29,10 +29,12 @@ class GemmaIntent:
     def __init__(self, model=config.GEMMA_MODEL):
         import litert_lm
         B = litert_lm.Backend
+        # newer litert-lm wants Backend instances (GPU()), older ones take the enum value
+        gpu, cpu = (b() if callable(b) else b for b in (B.GPU, B.CPU))
         try:
-            self.engine = litert_lm.Engine(model, backend=B.GPU if config.GEMMA_USE_GPU else B.CPU)
+            self.engine = litert_lm.Engine(model, backend=gpu if config.GEMMA_USE_GPU else cpu)
         except Exception:
-            self.engine = litert_lm.Engine(model, backend=B.CPU)
+            self.engine = litert_lm.Engine(model, backend=cpu)
         self.system = SYSTEM.format(tools=", ".join(config.TOOLS))
 
     def _ask(self, text):

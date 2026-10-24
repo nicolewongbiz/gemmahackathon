@@ -38,6 +38,7 @@ PLANNING_GROUP = "manipulator"
 BASE_FRAME = "base_link"
 EE_LINK = "end_effector_link"      # tip of the manipulator group = the flange
 TCP_OFFSET_M = 0.15                # flange -> 2F-85 pinch point along tool z (check with tf2_echo, Phase 1.6)
+FINGERS_ALONG = "x"                # flange axis the 2F-85 fingers close along (check in RViz, Phase 1.6)
 HOVER_M = 0.12                     # approach / lift height above the grasp
 VEL_SCALE, ACC_SCALE = 0.2, 0.2
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"

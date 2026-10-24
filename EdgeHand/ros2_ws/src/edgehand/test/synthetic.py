@@ -42,5 +42,7 @@ def frame(tools, tag_xy=None):
         handle_end = ferrule + d * 0.10                            # 10 cm handle
         px = lambda p: tuple(int(round(v)) for v in to_px(Hc, *p))
         cv2.line(img, px(tip), px(ferrule), (185, 185, 190), 8)                     # grey metal shaft
-        cv2.line(img, px(ferrule), px(handle_end), COLOURS[name], 34)               # coloured handle
+        n = np.array([-d[1], d[0]]) * 0.012                         # 2.4 cm wide handle, flat ends
+        poly = np.array([px(ferrule + n), px(handle_end + n), px(handle_end - n), px(ferrule - n)], np.int32)
+        cv2.fillConvexPoly(img, poly, COLOURS[name])
     return img

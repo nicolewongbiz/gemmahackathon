@@ -4,15 +4,20 @@ from edgehand import config
 
 
 def quat_from_R(R):
+    """Rotation matrix -> (x, y, z, w). Shepperd's method: stable for 180-degree rotations too."""
     R = np.asarray(R, float)
-    w = np.sqrt(max(0.0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
-    x = np.sqrt(max(0.0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2
-    y = np.sqrt(max(0.0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2
-    z = np.sqrt(max(0.0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2
-    x = np.copysign(x, R[2, 1] - R[1, 2])
-    y = np.copysign(y, R[0, 2] - R[2, 0])
-    z = np.copysign(z, R[1, 0] - R[0, 1])
-    return np.array([x, y, z, w])
+    t = np.trace(R)
+    if t > 0:
+        s = 2 * np.sqrt(1 + t)
+        q = [(R[2, 1] - R[1, 2]) / s, (R[0, 2] - R[2, 0]) / s, (R[1, 0] - R[0, 1]) / s, s / 4]
+    else:
+        i = int(np.argmax(np.diag(R)))
+        j, k = (i + 1) % 3, (i + 2) % 3
+        s = 2 * np.sqrt(1 + R[i, i] - R[j, j] - R[k, k])
+        q = [0.0, 0.0, 0.0, (R[k, j] - R[j, k]) / s]
+        q[i], q[j], q[k] = s / 4, (R[j, i] + R[i, j]) / s, (R[k, i] + R[i, k]) / s
+    q = np.array(q)
+    return q / np.linalg.norm(q)
 
 
 def R_from_quat(q):
@@ -23,13 +28,18 @@ def R_from_quat(q):
 
 
 def tool_down_R(handle_dir_xy):
-    """Gripper pointing straight down (tool z = -world z), with tool +x along handle_dir_xy.
-
-    The 2F-85 fingers close along the tool's y axis, so they close across a tool lying along x."""
-    x = np.array([handle_dir_xy[0], handle_dir_xy[1], 0.0])
-    x /= np.linalg.norm(x)
+    """Flange orientation for a tool lying along handle_dir_xy: pointing straight down (flange z = -world z),
+    fingers closing across the tool. FINGERS_ALONG says which flange axis the fingers close along, so the other
+    horizontal flange axis lies along the tool and points at the handle."""
+    d = np.array([handle_dir_xy[0], handle_dir_xy[1], 0.0])
+    d /= np.linalg.norm(d)
     z = np.array([0.0, 0.0, -1.0])
-    y = np.cross(z, x)
+    if config.FINGERS_ALONG == "y":
+        x = d
+        y = np.cross(z, x)
+    else:
+        y = d
+        x = np.cross(y, z)
     return np.column_stack([x, y, z])
 
 

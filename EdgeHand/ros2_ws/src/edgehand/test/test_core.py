@@ -39,10 +39,15 @@ def test_quat_roundtrip():
         assert np.isclose(np.linalg.det(R), 1)
 
 
-def test_tool_down_points_down_and_handle_to_operator():
+@pytest.mark.parametrize("fingers", ["x", "y"])
+def test_tool_down_points_down_and_handle_to_operator(fingers, monkeypatch):
+    monkeypatch.setattr(config, "FINGERS_ALONG", fingers)
     R = handover_R()
-    assert np.allclose(R[:, 2], [0, 0, -1])
-    assert np.allclose(R[:2, 0], np.array(config.OPERATOR_DIR[:2]) / np.linalg.norm(config.OPERATOR_DIR[:2]))
+    along = R[:, 1] if fingers == "x" else R[:, 0]          # the flange axis lying along the tool
+    across = R[:, 0] if fingers == "x" else R[:, 1]          # the axis the fingers close along
+    assert np.allclose(R[:, 2], [0, 0, -1]) and np.isclose(np.linalg.det(R), 1)
+    assert np.allclose(along[:2], np.array(config.OPERATOR_DIR[:2]) / np.linalg.norm(config.OPERATOR_DIR[:2]))
+    assert np.isclose(across @ np.array([*config.OPERATOR_DIR[:2], 0]), 0)
 
 
 def test_flange_is_above_fingertips_when_pointing_down():
