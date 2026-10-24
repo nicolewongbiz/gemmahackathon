@@ -168,6 +168,7 @@ def test_assistant_defers_asking_while_the_arm_is_busy():
         a = assistant.Assistant(send=False)
     asked = []
     a._confirm = lambda r, ph: asked.append((r["tool"], ph["phase"]))
+    a._decide = lambda ph: a.busy.release()          # no Gemma here: only the arm_state deferral is under test
     with mock.patch("edgehand.voice_node.speak", lambda t: None):
         a.phase.update(phase="Clipping", seq=3)
         a.on_phase({"type": "arm_state", "state": "busy", "tool": "clear"})
