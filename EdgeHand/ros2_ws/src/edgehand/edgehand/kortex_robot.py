@@ -155,7 +155,7 @@ class KortexRobot:
                     return
                 result["event"], result["why"] = ev, why
                 done.set()
-        state = self.base.GetArmState().active_state
+        state = self._wait_ready(config.KORTEX_READY_WAIT_S)
         if state != B.ARMSTATE_SERVOING_READY:
             self.log(f"kortex: not moving, arm state is {B.ArmState.Name(state)}. {self._state_hint(state)}")
             return False
@@ -176,11 +176,21 @@ class KortexRobot:
         if result.get("event") != B.ACTION_END:
             why = "stop" if self._stopped else (result.get("why") or "no details: unreachable pose, fault, or a "
                                                  "zero-length move")
-            time.sleep(0.5)
-            state = self.base.GetArmState().active_state
+            state = self._wait_ready(1.0)
             self.log(f"kortex: move aborted ({why}); arm state {B.ArmState.Name(state)}. {self._state_hint(state)}")
             return False
+        self._wait_ready(config.KORTEX_READY_WAIT_S)      # the state flickers (MANUALLY_CONTROLLED) right after a move
         return True
+
+    def _wait_ready(self, timeout_s):
+        """Poll the arm state until SERVOING_READY or the timeout; returns the last state seen."""
+        B = self.B
+        t0 = time.time()
+        while True:
+            state = self.base.GetArmState().active_state
+            if state == B.ARMSTATE_SERVOING_READY or time.time() - t0 > timeout_s:
+                return state
+            self.wait(0.1)
 
     def _state_hint(self, state):
         B = self.B

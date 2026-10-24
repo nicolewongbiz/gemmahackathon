@@ -114,6 +114,7 @@ VEL_SCALE, ACC_SCALE = 0.2, 0.2
 KORTEX_LINEAR_SPEED_MPS = 0.05     # at VEL_SCALE; move_line's scale= (the slow last 3 cm) scales it down
 KORTEX_ANGULAR_SPEED_DPS = 15.0
 KORTEX_ACTION_TIMEOUT_S = 40.0
+KORTEX_READY_WAIT_S = 4.0          # the state flickers for a moment after each move; wait this long for READY
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.8
 GRIPPER_MAX_EFFORT = 50.0

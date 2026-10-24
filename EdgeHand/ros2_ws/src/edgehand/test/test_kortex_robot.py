@@ -46,7 +46,9 @@ class FakeBase:
         self.executed = []
 
     def GetArmState(self):
-        return type("S", (), {"active_state": self.B.ARMSTATE_SERVOING_READY})()
+        # the controller reports MANUALLY_CONTROLLED for a moment after a move, then READY again
+        st = self.states.pop(0) if getattr(self, "states", None) else self.B.ARMSTATE_SERVOING_READY
+        return type("S", (), {"active_state": st})()
 
     def OnNotificationActionTopic(self, cb, opts):
         self.cb = cb
@@ -73,6 +75,7 @@ def _robot_with_base(base):
     r = KortexRobot.__new__(KortexRobot)
     Base_pb2 = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
     r.B, r.base, r.log, r._stopped, r.tool_z = Base_pb2, base, lambda *a: None, False, 0.12
+    r.wait = lambda s: None
     return r
 
 
@@ -91,12 +94,25 @@ def test_execute_reports_a_real_abort():
     B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
     base = FakeBase(B, stale=True, end=B.ACTION_ABORT)
     r = _robot_with_base(base)
-    import time as _t
-    _t.sleep = lambda s: None                                        # the post-abort state read waits 0.5 s
-    try:
-        assert r._execute(B.Action()) is False
-    finally:
-        import importlib; importlib.reload(_t)
+    assert r._execute(B.Action()) is False
+
+
+def test_execute_waits_through_the_state_flicker_after_a_move(monkeypatch):
+    B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
+    base = FakeBase(B, stale=False)
+    base.states = [B.ARMSTATE_SERVOING_MANUALLY_CONTROLLED, B.ARMSTATE_SERVOING_PLAYING_SEQUENCE,
+                   B.ARMSTATE_SERVOING_READY]                       # what the lab saw right after Home
+    r = _robot_with_base(base)
+    assert r._execute(B.Action()) is True and len(base.executed) == 1
+
+
+def test_execute_refuses_when_the_arm_stays_held(monkeypatch):
+    B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
+    monkeypatch.setattr(config, "KORTEX_READY_WAIT_S", 0.0)
+    base = FakeBase(B, stale=False)
+    base.states = [B.ARMSTATE_SERVOING_MANUALLY_CONTROLLED] * 50
+    r = _robot_with_base(base)
+    assert r._execute(B.Action()) is False and base.executed == []
 
 
 def test_near_joint_limit_spots_the_folded_arm():
