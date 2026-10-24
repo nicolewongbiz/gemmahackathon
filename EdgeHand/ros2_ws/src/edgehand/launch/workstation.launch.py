@@ -1,7 +1,7 @@
 """Workstation: MoveIt + ros2_kortex driver (one launch, it starts the driver itself) + EdgeHand nodes, including
 vision_node (the wrist camera is cabled to this machine).
     ros2 launch edgehand workstation.launch.py robot_ip:=192.168.1.10
-    ros2 launch edgehand workstation.launch.py robot_ip:=0.0.0.0 use_fake_hardware:=true require_pi:=false
+    ros2 launch edgehand workstation.launch.py robot_ip:=0.0.0.0 use_fake_hardware:=true
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -17,7 +17,7 @@ def generate_launch_description():
     args = [DeclareLaunchArgument("robot_ip"),
             DeclareLaunchArgument("use_fake_hardware", default_value="false"),
             DeclareLaunchArgument("launch_rviz", default_value="true"),
-            DeclareLaunchArgument("require_pi", default_value="true"),
+            DeclareLaunchArgument("require_pi", default_value="false"),   # the Pi was dropped (Oct 24)
             DeclareLaunchArgument("with_moveit", default_value="true"),
             DeclareLaunchArgument("camera", default_value="usb"),        # usb | rtsp | topic
             DeclareLaunchArgument("namer", default_value="gemma"),       # gemma | colour

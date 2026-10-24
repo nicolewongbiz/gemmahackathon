@@ -4,6 +4,8 @@
 
 This README is the single source of documentation for EdgeHand: spec, setup, run and troubleshooting.
 
+> **Oct 24: the Raspberry Pi is dropped.** Stopping is the Kinova's red E-stop, plus Ctrl-C in `run_kortex`. The Pi sections below (buttons, watchdog, `pi_bridge`, `pi/edgehand_pi.py`) describe optional code that isn't part of the demo, and `require_pi` now defaults to false. The plan is a laptop (vision fallback, motion, safety) plus a Jetson (Gemma voice, then vision) on the event link (§3.2).
+
 ## What changed from v1
 
 | # | v1 said | Problem | v2 |
