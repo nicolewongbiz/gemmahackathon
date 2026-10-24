@@ -40,18 +40,21 @@ def already_there(p0, R0, p1, R1, pos_tol=0.003, ang_tol_deg=1.0):
     return np.degrees(np.arccos(np.clip(cos, -1, 1))) < ang_tol_deg
 
 
-def free_waypoints(p0, p1, R1, lift=0.0):
-    """Flange waypoints for a free move p0 -> p1: rise to max(z0, z1) + lift, translate there, descend. Orientation
-    changes during the first leg. Legs shorter than 2 mm are dropped."""
+def free_waypoints(p0, p1, R1, R0=None, lift=0.0):
+    """Flange (position, R) waypoints for a free move p0 -> p1: rise to max(z0, z1) + lift keeping the current
+    orientation R0, turn to R1 up there, translate, descend. So the gripper never swings its fingertips down near the
+    table and never moves sideways low. Legs that change nothing are dropped."""
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    R0 = np.asarray(R1 if R0 is None else R0, float)
     top = max(p0[2], p1[2]) + lift
-    pts = [np.array([p0[0], p0[1], top]), np.array([p1[0], p1[1], top]), p1]
-    out, last = [], p0
-    for p in pts:
-        if np.linalg.norm(p - last) > 0.002:
-            out.append(p)
-            last = p
-    return out or [p1]
+    legs = [(np.array([p0[0], p0[1], top]), R0), (np.array([p0[0], p0[1], top]), R1),
+            (np.array([p1[0], p1[1], top]), R1), (p1, R1)]
+    out, last_p, last_R = [], p0, R0
+    for p, R in legs:
+        if np.linalg.norm(p - last_p) > 0.002 or not already_there(last_p, last_R, p, R):
+            out.append((p, R))
+            last_p, last_R = p, R
+    return out or [(p1, R1)]
 
 
 class KortexRobot:
@@ -116,8 +119,17 @@ class KortexRobot:
         def cb(n):
             if n.action_event in (B.ACTION_END, B.ACTION_ABORT):
                 result["event"] = n.action_event
-                result["why"] = str(getattr(n, "abort_details", "")).strip()
+                code = getattr(n, "abort_details", 0)
+                try:
+                    result["why"] = f"{B.SubErrorCodes.Name(code)} ({code})"
+                except ValueError:
+                    result["why"] = str(code)
                 done.set()
+        state = self.base.GetArmState().active_state
+        if state != B.ARMSTATE_SERVOING_READY:
+            self.log(f"kortex: not moving, arm state is {B.ArmState.Name(state)} (clear the fault / let the "
+                     "current action finish; the Web App or another session may be driving it)")
+            return False
         h = self.base.OnNotificationActionTopic(cb, B.NotificationOptions())
         try:
             self._stopped = False
@@ -131,6 +143,7 @@ class KortexRobot:
         if result.get("event") != B.ACTION_END:
             why = "stop" if self._stopped else (result.get("why") or "no details: unreachable pose, fault, or a "
                                                  "zero-length move")
+            time.sleep(0.5)
             self.log(f"kortex: move aborted ({why}); arm state "
                      f"{B.ArmState.Name(self.base.GetArmState().active_state)}")
             return False
@@ -151,8 +164,8 @@ class KortexRobot:
         if already_there(p0, R0, p, R):
             self.log("kortex: already at the target")
             return False if too_low(p, R) else True
-        for wp in free_waypoints(p0, p, R):
-            if not self._reach(wp, R, config.KORTEX_LINEAR_SPEED_MPS):
+        for wp, wR in free_waypoints(p0, p, R, R0):
+            if not self._reach(wp, wR, config.KORTEX_LINEAR_SPEED_MPS):
                 return False
         return True
 

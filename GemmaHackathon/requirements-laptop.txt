@@ -9,3 +9,4 @@ huggingface_hub
 pillow
 # Kortex API is NOT on PyPI: download kortex_api-2.x.whl from Kinova's Artifactory
 # then: pip install kortex_api-2.6.0.post3-py3-none-any.whl
+pyobjc-framework-AVFoundation   # macOS only: EdgeHand picks the RealSense by name (CAMERA_USB_NAME)

@@ -46,10 +46,14 @@ def usb_cameras():
 def configured_source():
     if config.CAMERA_SOURCE != "usb":
         return config.CAMERA_RTSP
-    for i, name in usb_cameras():                    # by name: indexes shift when an iPhone etc. connects
+    cams = usb_cameras()                             # by name: indexes shift when an iPhone etc. connects
+    for i, name in cams:
         if config.CAMERA_USB_NAME.lower() in name.lower():
             return i
-    return config.CAMERA_USB_INDEX
+    if cams:                                         # we can see the cameras and the right one isn't there: say so
+        raise RuntimeError(f"no camera named like {config.CAMERA_USB_NAME!r}; connected: "
+                           + ", ".join(f"{i}: {n}" for i, n in cams) + ". Plug the RealSense into this computer.")
+    return config.CAMERA_USB_INDEX                   # can't list names (no AVFoundation binding): the configured index
 
 
 class StreamCamera:

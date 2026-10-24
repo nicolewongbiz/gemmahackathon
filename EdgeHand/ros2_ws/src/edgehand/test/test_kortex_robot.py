@@ -20,10 +20,23 @@ def test_kortex_theta_inverts_kortex_R(theta):
 def test_free_move_rises_translates_then_descends():
     p0, p1 = (0.40, 0.00, 0.30), (0.55, 0.20, 0.20)
     wps = free_waypoints(p0, p1, np.eye(3))
-    assert len(wps) == 2 and np.allclose(wps[0], (0.55, 0.20, 0.30)) and np.allclose(wps[1], p1)
+    assert len(wps) == 2 and np.allclose(wps[0][0], (0.55, 0.20, 0.30)) and np.allclose(wps[1][0], p1)
     wps = free_waypoints(p1, p0, np.eye(3))                                 # going up: rise first
-    assert len(wps) == 2 and np.allclose(wps[0], (0.55, 0.20, 0.30)) and np.allclose(wps[1], p0)
+    assert len(wps) == 2 and np.allclose(wps[0][0], (0.55, 0.20, 0.30)) and np.allclose(wps[1][0], p0)
     assert len(free_waypoints((0.4, 0, 0.3), (0.4, 0, 0.3), np.eye(3))) == 1   # no-op move still returns a target
+
+
+def test_free_move_turns_only_at_height():
+    # the arm points forward, low over the table (where the lab found it); the look pose is straight down, higher
+    p0, R0 = (0.396, 0.025, 0.241), kortex_R(87.5, 12.1, 93.2)
+    p1, R1 = (0.253, -0.067, 0.496), kortex_R(-180, 0, 99)
+    wps = free_waypoints(p0, p1, R1, R0)
+    assert np.allclose(wps[0][0], (0.396, 0.025, 0.496)) and np.allclose(wps[0][1], R0)     # rise, same orientation
+    assert np.allclose(wps[1][0], (0.396, 0.025, 0.496)) and np.allclose(wps[1][1], R1)     # turn up there
+    assert np.allclose(wps[2][0], (0.253, -0.067, 0.496)) and np.allclose(wps[2][1], R1)    # translate
+    assert len(wps) == 3                                                                     # already at z: no descent
+    for p, R in wps:
+        assert table_clearance(p, R) > 0.2
 
 
 class FakeKortex(KortexRobot):
