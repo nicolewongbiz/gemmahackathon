@@ -109,9 +109,9 @@ class FakeRobot:
         return name != self.fail
 
     def move_free(self, p, R): return self._do("free", p, R)
-    def move_line(self, p, R): return self._do("line", p, R)
+    def move_line(self, p, R, collisions=True): return self._do("line", p, R)
     def gripper(self, pos): return self._do(f"grip{pos}")
-    def home(self): return self._do("home")
+    def park(self): return self._do("park")
     def cancel(self): self.calls.append("cancel")
 
     def wait(self, s):
@@ -127,7 +127,7 @@ def test_handover_sequence_with_tug():
     ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))
     assert ok, msg
     assert r.calls == [f"grip{config.GRIPPER_OPEN}", "free", "line", f"grip{config.GRIPPER_CLOSED}", "line",
-                       "free", f"grip{config.GRIPPER_OPEN}", "line", "home"]
+                       "free", f"grip{config.GRIPPER_OPEN}", "line", "park"]
 
 
 def test_handover_release_button():

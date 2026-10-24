@@ -2,9 +2,10 @@
 
 A Robot provides (all poses are the FLANGE, EE_LINK, as position + 3x3 rotation in the base frame):
     move_free(p, R) -> bool      planned collision-free move (MoveIt move_group)
-    move_line(p, R) -> bool      straight-line move (MoveIt compute_cartesian_path)
+    move_line(p, R, collisions=True) -> bool   straight-line move (MoveIt compute_cartesian_path); collisions=False
+                                 lets the short vertical descend/lift enter the tray keep-out box
     gripper(pos) -> bool         0.0 open ... 0.8 closed
-    home() -> bool
+    park() -> bool               joint move to PARK_JOINTS, out of the camera's view
     efforts() -> {joint: N*m}    latest measured joint torques
     wait(seconds)                sleep (ROS) or step physics (sim)
     cancel()                     stop the current motion now
@@ -26,6 +27,7 @@ class Handover:
         self.stop_flag = threading.Event()
         self.release_flag = threading.Event()
         self.detector = TugDetector()
+        self.holding = False             # True while waiting for the tug (for status displays)
 
     # called from other threads (ROS callbacks)
     def stop(self):
@@ -65,16 +67,16 @@ class Handover:
             self.state("picking")
             self._step("open", r.gripper(config.GRIPPER_OPEN))
             self._step("approach", r.move_free(*t["hover"]))
-            self._step("descend", r.move_line(*t["grasp"]))
+            self._step("descend", r.move_line(*t["grasp"], collisions=False))
             self._step("close", r.gripper(config.GRIPPER_CLOSED))
-            self._step("lift", r.move_line(*t["hover"]))
+            self._step("lift", r.move_line(*t["hover"], collisions=False))
             self.state("presenting")
             self._step("to handover", r.move_free(*t["give"]))
             self._wait_for_tug()
             self._step("release", r.gripper(config.GRIPPER_OPEN))
             self.state("retreating")
             self._step("retreat", r.move_line(*t["retreat"]))
-            self._step("home", r.home())
+            self._step("park", r.park())
             self.state("idle")
             return True, "handed over"
         except Stopped as e:
@@ -94,6 +96,14 @@ class Handover:
         self.detector.set_baseline(samples)
         self.state("holding: pull the handle or press RELEASE")
         self.log("holding; waiting for a tug or RELEASE")
+        self.holding = True
+        try:
+            self._hold()
+        finally:
+            self.holding = False
+
+    def _hold(self):
+        r = self.robot
         while True:
             if self.stop_flag.is_set():
                 raise Stopped("holding")

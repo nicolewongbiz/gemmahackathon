@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -15,5 +16,5 @@ def generate_launch_description():
              parameters=[{"video_device": LaunchConfiguration("video_device"), "image_size": [1280, 720],
                           "output_encoding": "rgb8"}]),
         Node(package="edgehand", executable="vision_node", output="screen",
-             parameters=[{"show": LaunchConfiguration("show")}]),
+             parameters=[{"show": ParameterValue(LaunchConfiguration("show"), value_type=bool)}]),
     ])

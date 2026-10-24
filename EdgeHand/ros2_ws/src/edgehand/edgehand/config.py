@@ -27,7 +27,7 @@ TABLE_TAGS = {                     # tag36h11 id -> tag centre (x, y). MEASURE O
 }
 TAG_SIZE_M = 0.05
 TABLE_Z = 0.0                      # table surface height in the base frame
-MAT_MAX_VAL = 70                   # HSV V below this = dark mat (background)
+SHAFT_MIN_VAL = 140                # shaft = bright (HSV V) and unsaturated; a lit dark mat stays below this
 TOOL_MIN_AREA_PX = 800             # smaller blobs are noise
 SHAFT_MAX_SAT = 70                 # shaft = low saturation (metal); handle = its TOOLS colour
 TOOL_RADIUS_M = 0.012              # grasp height above the table (shaft lies on the handle's radius)
@@ -37,9 +37,15 @@ GRASP_FROM_FERRULE_M = 0.02        # grasp the shaft this far from where the han
 PLANNING_GROUP = "manipulator"
 BASE_FRAME = "base_link"
 EE_LINK = "end_effector_link"      # tip of the manipulator group = the flange
-TCP_OFFSET_M = 0.15                # flange -> 2F-85 pinch point along tool z (check with tf2_echo, Phase 1.6)
+# Flange -> the point between the pads that goes on the shaft axis, along tool z. The 2F-85 fingertips move ~13 mm
+# further out as they close on a thin shaft, so: TCP_OFFSET_M = closed fingertip distance + 0.004 - TOOL_RADIUS_M.
+# Sim (Menagerie 2F-85): 0.173 + 0.004 - 0.012 = 0.165. MEASURE the real one (README Phase 1.6).
+TCP_OFFSET_M = 0.165
 FINGERS_ALONG = "x"                # flange axis the 2F-85 fingers close along (check in RViz, Phase 1.6)
 HOVER_M = 0.12                     # approach / lift height above the grasp
+# Kinova "Retract" (joint_1..7, rad): folded by the base, out of the overhead camera's view. The arm parks here
+# before vision looks at the tray and after each handover (in Home it hangs over the tray and hides the tools).
+PARK_JOINTS = [0.0, -0.35, 3.14, -2.55, 0.0, -0.87, 1.57]
 VEL_SCALE, ACC_SCALE = 0.2, 0.2
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.8
@@ -47,6 +53,9 @@ GRIPPER_MAX_EFFORT = 50.0
 HANDOVER_XYZ = (0.45, 0.30, 0.35)  # where the tool is presented (operator's chest height, not face)
 OPERATOR_DIR = (0.0, 1.0, 0.0)     # unit vector, base frame: the handle points this way
 WORKSPACE = {"x": (0.15, 0.80), "y": (-0.55, 0.55), "z": (0.0, 0.70)}
+# MoveIt only avoids what is in its planning scene. handover_node adds the table and a keep-out box this tall over
+# the tag rectangle (the tools), so free moves never sweep the tray; only the vertical descend/lift enter it.
+TRAY_KEEPOUT_H = 0.06
 
 # ---- Release: tug detection on joint torques (/joint_states effort, N*m) ----
 TUG_JOINTS = ["joint_5", "joint_6", "joint_7"]   # wrist joints feel a pull on the tool most

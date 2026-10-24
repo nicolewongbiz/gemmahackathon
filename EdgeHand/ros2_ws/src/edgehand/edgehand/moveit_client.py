@@ -2,27 +2,27 @@
 
     move_free  -> move_group action /move_action (pose goal for EE_LINK)
     move_line  -> /compute_cartesian_path, slowed to VEL_SCALE, then /execute_trajectory
+    add_scene  -> /apply_planning_scene: table + keep-out box over the tool tray
     gripper    -> /robotiq_gripper_controller/gripper_cmd
     efforts    -> /joint_states effort (measured joint torques)
 
 Blocking calls are made from a worker thread while a MultiThreadedExecutor spins the node.
 """
 import threading, time
+import numpy as np
 from builtin_interfaces.msg import Duration
 from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Pose
+from moveit_msgs.msg import CollisionObject
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes,
                              OrientationConstraint, PositionConstraint)
-from moveit_msgs.srv import GetCartesianPath
+from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath
 from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
 from edgehand import config
 from edgehand.geometry import quat_from_R
-
-HOME_JOINTS = [0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57]   # Kinova "Home" (joint_1..joint_7, rad)
-
 
 def pose_msg(p, R):
     m = Pose()
@@ -32,10 +32,12 @@ def pose_msg(p, R):
 
 
 def _wait(future, timeout):
-    ev = threading.Event()
-    future.add_done_callback(lambda _: ev.set())
-    if not ev.wait(timeout):
-        raise TimeoutError("ROS call timed out")
+    # poll rather than add_done_callback: done-callbacks run on the executor and can lag by seconds
+    deadline = time.time() + timeout
+    while not future.done():
+        if time.time() > deadline:
+            raise TimeoutError("ROS call timed out")
+        time.sleep(0.005)
     return future.result()
 
 
@@ -56,6 +58,7 @@ class MoveItRobot:
         self.execute = ActionClient(node, ExecuteTrajectory, "/execute_trajectory")
         self.grip = ActionClient(node, GripperCommand, config.GRIPPER_ACTION)
         self.cartesian = node.create_client(GetCartesianPath, "/compute_cartesian_path")
+        self.scene = node.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self._efforts = {}
         self._goal = None                        # current goal handle, for cancel()
         self._lock = threading.Lock()
@@ -68,6 +71,26 @@ class MoveItRobot:
     def wait_for_servers(self, timeout=30.0):
         ok = all(c.wait_for_server(timeout_sec=timeout) for c in (self.move, self.execute, self.grip))
         return ok and self.cartesian.wait_for_service(timeout_sec=timeout)
+
+    def add_scene(self):
+        """Table (top just under TABLE_Z so the base doesn't touch it) and the tray keep-out box."""
+        xs = [p[0] for p in config.TABLE_TAGS.values()]
+        ys = [p[1] for p in config.TABLE_TAGS.values()]
+        boxes = {"table": ((1.6, 1.6, 0.02), (0.3, 0.0, config.TABLE_Z - 0.015)),
+                 "tray": ((max(xs) - min(xs) + 0.1, max(ys) - min(ys) + 0.1, config.TRAY_KEEPOUT_H),
+                          ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, config.TABLE_Z + config.TRAY_KEEPOUT_H / 2))}
+        req = ApplyPlanningScene.Request()
+        req.scene.is_diff = True
+        req.scene.robot_state.is_diff = True
+        for name, (size, centre) in boxes.items():
+            o = CollisionObject()
+            o.header.frame_id, o.id, o.operation = config.BASE_FRAME, name, CollisionObject.ADD
+            o.primitives = [SolidPrimitive(type=SolidPrimitive.BOX, dimensions=list(map(float, size)))]
+            o.primitive_poses = [pose_msg(centre, np.eye(3))]
+            req.scene.world.collision_objects.append(o)
+        if not self.scene.wait_for_service(timeout_sec=10.0):
+            return False
+        return _wait(self.scene.call_async(req), self.timeout).success
 
     def _send(self, client, goal):
         handle = _wait(client.send_goal_async(goal), self.timeout)
@@ -116,13 +139,13 @@ class MoveItRobot:
         c.position_constraints, c.orientation_constraints = [pc], [oc]
         return self._plan_and_go(c)
 
-    def move_line(self, p, R):
+    def move_line(self, p, R, collisions=True):
         req = GetCartesianPath.Request()
         req.header.frame_id = config.BASE_FRAME
         req.start_state.is_diff = True
         req.group_name, req.link_name = config.PLANNING_GROUP, config.EE_LINK
         req.waypoints = [pose_msg(p, R)]
-        req.max_step, req.jump_threshold, req.avoid_collisions = 0.005, 0.0, True
+        req.max_step, req.jump_threshold, req.avoid_collisions = 0.005, 0.0, collisions
         res = _wait(self.cartesian.call_async(req), self.timeout)
         if res.fraction < 0.99:
             self.node.get_logger().error(f"cartesian path only {res.fraction:.0%} feasible")
@@ -140,9 +163,9 @@ class MoveItRobot:
         # closing on a tool stalls before reaching the setpoint: that's a successful grasp
         return r is not None and (r.reached_goal or r.stalled)
 
-    def home(self):
+    def park(self):
         c = Constraints()
-        for i, q in enumerate(HOME_JOINTS):
+        for i, q in enumerate(config.PARK_JOINTS):
             c.joint_constraints.append(JointConstraint(joint_name=f"joint_{i + 1}", position=q, tolerance_above=0.01,
                                                        tolerance_below=0.01, weight=1.0))
         return self._plan_and_go(c)

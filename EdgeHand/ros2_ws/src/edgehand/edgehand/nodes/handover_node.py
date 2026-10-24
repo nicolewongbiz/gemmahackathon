@@ -41,7 +41,7 @@ class HandoverNode(Node):
 
     def publish_tug(self):
         d = self.handover.detector
-        if self.busy.locked() and d.baseline is not None:
+        if self.handover.holding:
             self.state_pub.publish(String(data=f"holding: delta torque {d.last_delta:.2f} / {config.TUG_TORQUE_NM} N*m"))
 
     def on_pose(self, msg):
@@ -61,12 +61,17 @@ class HandoverNode(Node):
         if not self.busy.acquire(blocking=False):
             self.say_pub.publish(String(data="I'm busy."))
             return
-        threading.Thread(target=self._run, args=(msg.data, self.get_clock().now()), daemon=True).start()
+        threading.Thread(target=self._run, args=(msg.data,), daemon=True).start()
 
-    def _run(self, tool, t_req):
+    def _run(self, tool):
         try:
+            self.publish_state("parking out of the camera's view")
+            if not self.robot.park():
+                self.say_pub.publish(String(data="I can't move to the park pose."))
+                self.publish_state("error")
+                return
             self.publish_state(f"looking for the {tool}")
-            pose = self._wait_pose(t_req)
+            pose = self._wait_pose(self.get_clock().now())
             if pose is None:
                 self.say_pub.publish(String(data=f"I can't see the {tool}."))
                 self.publish_state("idle")
@@ -95,8 +100,15 @@ class HandoverNode(Node):
 def main():
     rclpy.init()
     node = HandoverNode()
-    if not node.robot.wait_for_servers(30.0):
-        node.get_logger().error("MoveIt / gripper servers not available; is the MoveIt launch running?")
     ex = MultiThreadedExecutor()
     ex.add_node(node)
+
+    def setup():   # service calls need the executor spinning, so this runs beside it
+        if not node.robot.wait_for_servers(30.0):
+            node.get_logger().error("MoveIt / gripper servers not available; is the MoveIt launch running?")
+        elif not node.robot.add_scene():
+            node.get_logger().error("couldn't add the table / tray to the planning scene: free moves may hit them")
+        else:
+            node.get_logger().info("ready")
+    threading.Thread(target=setup, daemon=True).start()
     ex.spin()

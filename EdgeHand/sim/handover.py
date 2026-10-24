@@ -71,10 +71,11 @@ def build(tool_xy, tool_yaw):
     tool.add_freejoint()
     q_x = [np.cos(np.pi / 4), 0, np.sin(np.pi / 4), 0]       # capsule/cylinder axis (z) -> body x
     tool.add_geom(name="handle", type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[HANDLE_R, HANDLE_L / 2, 0],
-                  pos=[HANDLE_L / 2, 0, 0], quat=q_x, rgba=[0.8, 0.1, 0.1, 1], mass=0.05, friction=[1.0, 0.01, 0.001])
+                  pos=[HANDLE_L / 2, 0, 0], quat=q_x, rgba=[0.8, 0.1, 0.1, 1], mass=0.05, condim=6,
+                  friction=[1.0, 0.01, 0.002])      # condim 6 = rolling resistance; without it a round handle rolls away
     tool.add_geom(name="shaft", type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[SHAFT_R, SHAFT_L / 2, 0],
-                  pos=[-SHAFT_L / 2, 0, 0], quat=q_x, rgba=[0.72, 0.72, 0.75, 1], mass=0.02,
-                  friction=[1.0, 0.01, 0.001])
+                  pos=[-SHAFT_L / 2, 0, 0], quat=q_x, rgba=[0.72, 0.72, 0.75, 1], mass=0.02, condim=6,
+                  friction=[1.0, 0.01, 0.002])
     tool.add_site(name="grasp", pos=[-config.GRASP_FROM_FERRULE_M, 0, 0])
     tool.add_site(name="handle_mid", pos=[HANDLE_L / 2, 0, 0])
     wb.add_camera(name="overhead", pos=[0.475, 0, 1.0], fovy=45)          # fixed, looking straight down
@@ -98,12 +99,15 @@ class SimRobot:
         tq = m.joint(m.body("tool").jntadr[0]).qposadr[0]
         mujoco.mj_resetDataKeyframe(m, self.d, m.key("home").id)
         self.d.qpos[tq:tq + 7] = m.qpos0[tq:tq + 7]
-        self.d.ctrl[self.act] = self.q_cmd = self.q_home.copy()
+        self.q_park = np.array(config.PARK_JOINTS)
+        self.d.qpos[self.qa] = self.q_park
+        self.d.ctrl[self.act] = self.q_cmd = self.q_park.copy()
         self.pull = None                 # (start time, force N) of the simulated operator's tug
         self.released_at = None
         self.handle_towards_operator = None
         self.robot_bodies = {b for b in range(m.nbody) if self._under(b, m.body("shoulder_link").id)}
         self.events = set()
+        self.time_limit = 90.0
         self.video = video
         self.frames = []
         self._vr = mujoco.Renderer(m, 540, 960) if video else None
@@ -119,6 +123,8 @@ class SimRobot:
     # ---- physics ----
     def wait(self, seconds):
         tool = self.m.body("tool").id
+        if self.d.time > self.time_limit:
+            raise TimeoutError(f"sim time limit {self.time_limit} s")
         for _ in range(int(seconds / DT)):
             self.d.xfrc_applied[tool] = 0
             if self.pull and self.d.time >= self.pull[0] and self.released_at is None:
@@ -173,7 +179,7 @@ class SimRobot:
         self._track(q0 + (q1 - q0) * s for s in (0.5 - 0.5 * np.cos(np.pi * np.arange(1, n + 1) / n)))
         return True
 
-    def move_line(self, p, R):
+    def move_line(self, p, R, collisions=True):
         p0 = self.d.site_xpos[self.flange].copy()
         n = int(np.linalg.norm(np.asarray(p) - p0) / 0.05 / (DT * CTRL_EVERY)) + 1     # 5 cm/s
         qs, q = [], self.q_cmd
@@ -195,10 +201,10 @@ class SimRobot:
         self.wait(1.0)
         return True
 
-    def home(self):
+    def park(self):
         q0 = self.q_cmd.copy()
-        n = int(max(np.abs(self.q_home - q0)) / 0.3 / (DT * CTRL_EVERY)) + 1
-        self._track(q0 + (self.q_home - q0) * i / n for i in range(1, n + 1))
+        n = int(max(np.abs(self.q_park - q0)) / 0.3 / (DT * CTRL_EVERY)) + 1
+        self._track(q0 + (self.q_park - q0) * i / n for i in range(1, n + 1))
         return True
 
     def efforts(self):
@@ -242,7 +248,10 @@ def episode(rng, video=False, pull_delay=3.0, pull_n=12.0):
         r.pull = (r.d.time + pull_delay, pull_n)
         orig_wait_for_tug()
     h._wait_for_tug = schedule_pull
-    ok, msg = h.run(t["grasp_xy"], t["handle_dir"])
+    try:
+        ok, msg = h.run(t["grasp_xy"], t["handle_dir"])
+    except TimeoutError as e:
+        ok, msg = False, f"{e} (state: holding, last delta torque {h.detector.last_delta:.2f} N*m)"
     res = {"ok": ok and r.handle_towards_operator is True, "msg": msg, "vision_err_mm": err * 1000,
            "handle_towards_operator": r.handle_towards_operator, "events": sorted(r.events), "robot": r}
     if r.released_at is not None:

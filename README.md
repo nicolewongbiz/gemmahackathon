@@ -21,6 +21,11 @@ A simpler chat interface to the same arm: type plain-English commands ("move the
 
 See [GemmaHackathonBasic/README.md](GemmaHackathonBasic/README.md) for setup and usage.
 
+### [EdgeHand](EdgeHand/) — air-gapped tool handover
+"Hand me the Phillips": Gemma 4 (LiteRT-LM) names the tool, a Jetson with an overhead camera finds it, and ROS 2 Humble + MoveIt 2 has the Kinova grasp the shaft and present the handle. The gripper opens when the operator tugs it, detected from the arm's joint torques. A Raspberry Pi provides request, release and stop buttons plus a link watchdog.
+
+See [EdgeHand/README.md](EdgeHand/README.md) for the spec (v2, with what changed from v1), setup and the test results.
+
 ## Hardware (shared)
 
 | Item | Role |

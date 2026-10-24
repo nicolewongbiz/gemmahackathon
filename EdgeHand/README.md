@@ -16,7 +16,9 @@ This README is the single source of documentation for EdgeHand: spec, setup, run
 | 6 | Launch `kortex_bringup` **and** MoveIt | The MoveIt launch already starts `ros2_control_node` with the Kinova hardware interface. Two launches = two drivers on one arm | Launch only `kinova_gen3_7dof_robotiq_2f_85_moveit_config robot.launch.py` |
 | 7 | ROS 2 "Humble/Iron" on the workstation | Iron is end-of-life. MoveIt 2 needs Linux, and this team's laptop setup is Windows | **Humble on Ubuntu 22.04** (dual-boot the Legion). Jetson on **JetPack 6** (Ubuntu 22.04 → Humble from apt) |
 | 8 | Pi 4 over USB-C gadget | Pi 4's USB-C port is also its power input. A laptop port rarely gives the 3 A it needs, so it browns out. ROS 2 on Raspberry Pi OS also has no Humble binaries | Pi on its own 5 V / 3 A supply, wired to a USB-Ethernet adapter on the workstation. The Pi runs plain Python and sends UDP; `pi_bridge` on the workstation turns that into ROS topics |
-| 9 | Pose targets for "the tool" | MoveIt's `manipulator` group ends at `end_effector_link` (the flange), ~15 cm behind the fingertips | Targets are computed for the flange from the fingertip grasp point and `TCP_OFFSET_M` |
+| 9 | Pose targets for "the tool" | MoveIt's `manipulator` group ends at `end_effector_link` (the flange), ~17 cm behind the fingertips, and the 2F-85 fingertips move ~13 mm further out as they close | Targets are computed for the flange from the grasp point and `TCP_OFFSET_M` = closed fingertip distance + 4 mm − tool radius. With 0.15 the sim drove the pads into the table |
+| 10 | (missing) | With a fixed overhead camera the arm hides the tools: in Home it hangs right over the tray (found in sim) | The arm **parks** in Kinova's Retract pose (`PARK_JOINTS`) before vision looks and after every handover |
+| 11 | MoveIt plans "collision-free" | MoveIt only avoids what's in its planning scene, and by default that has no table and no tools | `handover_node` adds the table and a keep-out box over the tool tray at startup. Only the short vertical descend/lift run with collision checking off |
 
 ## 1. System overview
 
@@ -69,7 +71,9 @@ There's no switch and no Wi-Fi. The Jetson and the Pi never talk to each other, 
 ### 2.3 Motion (workstation): ROS 2 Humble + MoveIt 2
 - One launch brings up the driver, controllers, `move_group` and RViz: `kinova_gen3_7dof_robotiq_2f_85_moveit_config robot.launch.py`.
 - `handover_node` plans with the `move_group` action (`manipulator` group, tip `end_effector_link`) for free-space moves, and with `/compute_cartesian_path` for straight approach and lift, executing through `/execute_trajectory`. All plans use velocity and acceleration scaling 0.2.
-- Flange targets = fingertip target − `TCP_OFFSET_M` along the tool z axis. The gripper points straight down for picking.
+- Flange targets = grasp point − `TCP_OFFSET_M` along the tool z axis. The gripper points straight down for picking, with the fingers (`FINGERS_ALONG`) closing across the shaft.
+- At startup `handover_node` adds the table and a `TRAY_KEEPOUT_H` box over the tag rectangle to the planning scene (`/apply_planning_scene`). Free moves stay out of the tray; only the vertical descend/lift use `avoid_collisions: false`.
+- Before vision looks, and after each handover, the arm parks at `PARK_JOINTS` (Kinova Retract), out of the overhead camera's view.
 - Gripper: `/robotiq_gripper_controller/gripper_cmd` (`control_msgs/GripperCommand`, 0.0 open … 0.8 closed).
 
 ### 2.4 Handover and release
@@ -108,12 +112,13 @@ There's no switch and no Wi-Fi. The Jetson and the Pi never talk to each other, 
  vision_node: tags → homography, red handle → shaft grasp pose → /tool_pose_target
             |
             v
- handover_node (MoveIt, 20 % speed):
+ handover_node: park out of the camera's view (Retract), take a pose from a frame AFTER parking
+ MoveIt, 20 % speed:
    open → above tool → straight down → close → straight up
         → HANDOVER_XYZ, handle towards the operator → hold still, record torque baseline
             |
             v
-   tug detected (Δ wrist torque)  or  RELEASE button  →  open gripper → retreat → Home
+   tug detected (Δ wrist torque)  or  RELEASE button  →  open gripper → retreat → park
             |
    STOP button or Pi link lost at any point → cancel trajectory, hold position
 ```
@@ -148,7 +153,10 @@ There's no switch and no Wi-Fi. The Jetson and the Pi never talk to each other, 
    If the Jetson's topics don't show up in `ros2 topic list` on the workstation, use the unicast peer profile: `export FASTRTPS_DEFAULT_PROFILES_FILE=$PWD/EdgeHand/config/fastdds_peers.xml` on both.
 4. **Calibrate the camera.** Tape tags 0–3 at the tray corners. Jog the gripper fingertip onto each tag centre in the Kinova Web App, read x, y and enter them in `TABLE_TAGS`. Also record the table height for `TABLE_Z`.
 5. Check: `ros2 run edgehand vision_node --ros-args -p show:=true` shows CALIBRATED and the detected tools, and a clicked tag centre prints metres within 1 cm of `TABLE_TAGS`.
-6. Check the tool frame: `ros2 run tf2_ros tf2_echo end_effector_link robotiq_85_left_finger_tip_link` gives z ≈ `TCP_OFFSET_M`.
+6. **Check the gripper geometry** (the sim found both of these matter):
+   - Close the gripper and measure the flange face → fingertip distance *d* (ruler, or `ros2 run tf2_ros tf2_echo end_effector_link robotiq_85_left_finger_tip_link` with the gripper closed). Set `TCP_OFFSET_M = d + 0.004 − TOOL_RADIUS_M`.
+   - Open and close the gripper in RViz with the `end_effector_link` axes shown: set `FINGERS_ALONG` to the flange axis ("x" or "y") the fingers move along.
+   - Move the arm to `PARK_JOINTS` and check it's out of the overhead camera's view (`show:=true`).
 
 ### Phase 2: Core loop
 - **Workstation:** `ros2 launch edgehand workstation.launch.py robot_ip:=192.168.1.10`. This starts the MoveIt launch above plus `intent_node`, `handover_node` and `pi_bridge`.
@@ -158,7 +166,7 @@ There's no switch and no Wi-Fi. The Jetson and the Pi never talk to each other, 
 
 ### Phase 3: Dry run
 1. Mock hardware: `ros2 launch edgehand workstation.launch.py robot_ip:=0.0.0.0 use_fake_hardware:=true`. Use the RELEASE button, because there are no torques.
-2. MuJoCo, no ROS needed: `python -m sim.handover` from `EdgeHand/` runs vision, grasp, handover and tug release on a simulated Gen3 (§6).
+2. MuJoCo, no ROS needed: from `EdgeHand/`, `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20` runs vision, grasp, handover and tug release on a simulated Gen3 (§6).
 3. Real arm at 20% scaling, E-stop in hand. Tune `TUG_TORQUE_NM` with `ros2 topic echo /edgehand/state` (it prints the live Δτ).
 
 ## 5. Settings
@@ -172,7 +180,11 @@ Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
 | `TABLE_TAGS`, `TABLE_Z` | measured | tag centres (m, base frame), table height |
 | `TOOL_RADIUS_M` | 0.012 | z of the grasp above the table (shaft/handle radius) |
 | `GRASP_FROM_FERRULE_M` | 0.02 | grasp point on the shaft, measured from the handle |
-| `TCP_OFFSET_M` | 0.15 | flange → fingertip pinch point along tool z |
+| `TCP_OFFSET_M` | 0.165 | flange → grasp point along tool z: closed fingertip distance + 4 mm − `TOOL_RADIUS_M` (Phase 1.6) |
+| `FINGERS_ALONG` | "x" | flange axis the fingers close along (Phase 1.6) |
+| `PARK_JOINTS` | Kinova Retract | where the arm waits, out of the camera's view |
+| `TRAY_KEEPOUT_H` | 0.06 | height of the planning-scene box over the tool tray |
+| `SHAFT_MIN_VAL`, `SHAFT_MAX_SAT` | 140, 70 | HSV: a shaft is bright and unsaturated; a lit dark mat must stay below `SHAFT_MIN_VAL` |
 | `HOVER_M` | 0.12 | approach height above the grasp |
 | `HANDOVER_XYZ`, `OPERATOR_DIR` | (0.45, 0.30, 0.35), (0, 1, 0) | where the tool is presented and which way the handle points |
 | `TUG_TORQUE_NM`, `TUG_SAMPLES` | 1.5, 5 | release threshold on wrist-joint Δτ |
@@ -197,13 +209,23 @@ EdgeHand/
     edgehand/moveit_client.py  MoveGroup / Cartesian path / execute / gripper wrappers (rclpy)
     edgehand/nodes/*.py        intent_node, vision_node, handover_node, pi_bridge (rclpy)
     launch/                    workstation.launch.py, jetson.launch.py
-    test/                      pytest for the no-ROS modules
-  sim/handover.py              MuJoCo end-to-end test of the no-ROS modules
+    test/test_core.py          pytest for the no-ROS modules (synthetic camera frames, fake robot)
+    test/fake_cell.py          fake move_group / controllers / gripper / camera for testing the real nodes
+    test/run_integration.sh    all nodes (real Gemma) against fake_cell: text, STOP, Pi buttons
+  sim/handover.py              MuJoCo end-to-end test: overhead camera → vision → handover → operator tug
 ```
 
-The logic that matters lives in plain Python modules, tested without ROS: `pytest ros2_ws/src/edgehand/test`, plus the MuJoCo handover in `sim/`. ROS nodes are thin wrappers.
+**Tested so far** (Oct 23, on a Mac with ROS 2 Humble from RoboStack):
 
-**Not tested before the event:** `moveit_client.py` against a live `move_group`, and the nodes on the real Jetson, Pi and arm. Phase 3 step 1 is the first place they run together.
+| Test | Command (from `EdgeHand/ros2_ws/src/edgehand/`) | Result |
+|---|---|---|
+| Unit tests | `python -m pytest test/test_core.py` | 20/20 |
+| Gemma 4 E4B intent, 7 phrasings ("cross-head", "the flat one", "star", a hammer, off-topic) | `python -m edgehand.intent <model> < phrases.txt` | 7/7 correct, ~1.4 s each |
+| All nodes vs fake MoveIt: text → Gemma → vision → MoveIt → tug → release; STOP mid-move; Pi REQUEST + RELEASE over UDP | `bash test/run_integration.sh` | 3/3 |
+| Pi watchdog | heartbeats stop | `/edgehand/stop` within 0.45 s, none while beating |
+| MuJoCo, random tool poses: vision → pick → present → 12 N tug | from `EdgeHand/`: `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20` (needs the sim venv and models from `GemmaHackathon/README.md` §10) | 20/20, vision ≤ 3 mm, handle towards the operator every time, release 0.1 s after the pull, no table contact |
+
+**Not tested before the event:** `moveit_client.py` against a real `move_group` (only against `fake_cell.py`), MoveIt's own plans, the ros2_kortex controllers, a real camera, a real screwdriver's shaft and handle colours, and the real arm's joint-torque noise. Phase 3 step 1 (`use_fake_hardware:=true`) is the first place MoveIt and the nodes run together.
 
 ## 7. Troubleshooting
 

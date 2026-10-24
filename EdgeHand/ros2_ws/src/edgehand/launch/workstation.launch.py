@@ -8,6 +8,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -29,5 +30,5 @@ def generate_launch_description():
         Node(package="edgehand", executable="intent_node", output="screen"),
         Node(package="edgehand", executable="handover_node", output="screen"),
         Node(package="edgehand", executable="pi_bridge", output="screen",
-             parameters=[{"require_pi": LaunchConfiguration("require_pi")}]),
+             parameters=[{"require_pi": ParameterValue(LaunchConfiguration("require_pi"), value_type=bool)}]),
     ])

@@ -63,7 +63,7 @@ def detect_tools(frame, tmap):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     ignore = tmap.tag_mask(frame.shape)
     k = np.ones((5, 5), np.uint8)
-    shaft = cv2.inRange(hsv, (0, 0, config.MAT_MAX_VAL), (180, config.SHAFT_MAX_SAT, 255))
+    shaft = cv2.inRange(hsv, (0, 0, config.SHAFT_MIN_VAL), (180, config.SHAFT_MAX_SAT, 255))
     shaft[ignore > 0] = 0
     shaft = cv2.morphologyEx(shaft, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     out = []
@@ -88,8 +88,8 @@ def detect_tools(frame, tmap):
                 a, b = e + axis * sgn * 0.05 * length, e + axis * sgn * 0.6 * length
                 cv2.line(probe, tuple(map(int, a)), tuple(map(int, b)), 255, max(3, int(0.15 * length)))
                 scores.append(int(np.count_nonzero(probe & shaft)))
-            if max(scores) < 0.05 * length * 3:
-                continue                                              # no shaft: not a screwdriver lying flat
+            if max(scores) < 0.05 * length * 3 or max(scores) < 2 * min(scores):
+                continue                                              # no shaft, or can't tell which end has it
             ferrule_px = ends[int(np.argmax(scores))]
             ferrule, handle = tmap.px_to_table(*ferrule_px), tmap.px_to_table(*centre)
             d = handle - ferrule
