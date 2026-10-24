@@ -1,10 +1,11 @@
-"""Run the neurosurgical phase model (github.com/veronicawang1/neurosurgical_phase_recognition) on one video and
+"""Run the neurosurgical phase model (NeurosurgicalPhaseRecognition/ in this repo, from
+github.com/veronicawang1/neurosurgical_phase_recognition) on one video and
 write the phases.csv that edgehand/phase_player.py replays. Offline, before the demo.
 
 Same pipeline as the repo: frames at 1 FPS -> fine-tuned ResNet50 features (2048-d) -> MS-TCN (2 stages, 8 layers,
 128 filters, as in logs/mstcn_finetuned_v1) -> softmax -> Viterbi with the surgical ordering prior.
 
-    python predict_phases.py --repo ../../neurosurgical_phase_recognition --video ~/Desktop/clippingdemo.mp4 \
+    python predict_phases.py --repo ../../NeurosurgicalPhaseRecognition --video ~/Desktop/clippingdemo.mp4 \
         --backbone checkpoints/finetuned_backbone.pt --mstcn checkpoints/best_mstcn.pt --out ../data/phases/clippingdemo.csv
 
 Output: time_s,phase,p_<phase>... one row per second. The learned transition matrix needs the training labels, which
@@ -21,7 +22,7 @@ PHASES = ["Brain Exposure", "Parent Vessel Identification", "Dome and Neck Ident
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", required=True, help="path to the neurosurgical_phase_recognition checkout")
+    ap.add_argument("--repo", required=True, help="path to NeurosurgicalPhaseRecognition/ (this repo) or its upstream checkout")
     ap.add_argument("--video", required=True)
     ap.add_argument("--backbone", required=True, help="checkpoints/finetuned_backbone.pt")
     ap.add_argument("--mstcn", required=True, help="checkpoints/best_mstcn.pt")
