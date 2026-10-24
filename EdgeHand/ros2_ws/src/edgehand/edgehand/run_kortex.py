@@ -138,6 +138,33 @@ class ArmState:
             self._emit()
 
 
+KEYWORD_ALIASES = {"phillips": {"red", "red cap"}, "clear": {"clear", "transparent", "blue collar"},
+                   "flathead": {"yellow collar"}, "torx": {"green one"}}   # what people say about the real tray
+
+
+class KeywordIntent:
+    """Typed requests without Gemma, for when the assistant owns the GPU: a tool class name, its colour word (from
+    INSTRUMENTS) or its surgical role in the text picks the tool; 'stop' / 'release' / 'let go' are passed through
+    as intents. Returns {"tool", "intent", "reply"} like GemmaIntent.parse."""
+    def parse(self, text):
+        t = text.lower()
+        if any(w in t for w in ("stop", "halt", "freeze")):
+            return {"tool": None, "intent": "stop", "reply": "Stopping."}
+        if any(w in t for w in ("release", "let go", "open the gripper", "drop it")):
+            return {"tool": None, "intent": "release", "reply": "Releasing."}
+        words = {}
+        for cls in config.TOOLS:
+            words[cls] = {cls} | KEYWORD_ALIASES.get(cls, set())
+            inst = getattr(config, "INSTRUMENTS", {}).get(cls)
+            if inst:
+                colour, role = inst[0], inst[1]
+                words[cls] |= {colour, role} | set(role.split())
+        for cls, ws in words.items():
+            if any(w and w in t for w in ws):
+                return {"tool": cls, "intent": "request", "reply": f"Fetching the {cls}."}
+        return {"tool": None, "intent": "none", "reply": "Name a tool: " + ", ".join(config.TOOLS)}
+
+
 def _read_stdin(requests):
     while True:
         try:
@@ -223,8 +250,12 @@ def main():
         namer = GemmaNamer()
     intent = None
     if not a.tool and not a.look_only:
-        from edgehand.intent import GemmaIntent
-        intent = GemmaIntent() if isinstance(namer, (str, type(None))) else _share_engine(namer)
+        if a.listen and a.namer != "gemma":
+            intent = KeywordIntent()              # the assistant owns the GPU: no second LiteRT process here
+            print("typed requests: keyword matching (tool class, colour word or role); Gemma not loaded")
+        else:
+            from edgehand.intent import GemmaIntent
+            intent = GemmaIntent() if isinstance(namer, (str, type(None))) else _share_engine(namer)
     eyes = Eyes(namer)
 
     robot = None
@@ -282,7 +313,13 @@ def main():
                 kind, val = requests.next()
                 if kind == "text":
                     r = intent.parse(val)
-                    print("gemma:", r["reply"])
+                    print("intent:", r["reply"])
+                    if r.get("intent") == "stop":
+                        h.stop()
+                        continue
+                    if r.get("intent") == "release":
+                        h.release()
+                        continue
                     tool = r["tool"]
                     if tool is None:
                         continue

@@ -75,3 +75,14 @@ def test_arm_state_events_follow_the_handover():
     kinds = [(m["state"], m["tool"]) for m in sent if m["type"] == "arm_state"]
     assert kinds[:3] == [("busy", "torx"), ("holding", "torx"), ("idle", "torx")]   # idle carries the tool just handed
     assert all(m["type"] == "arm_state" for m in sent)
+
+
+def test_keyword_intent_maps_colour_role_and_class():
+    from edgehand.run_kortex import KeywordIntent
+    k = KeywordIntent()
+    assert k.parse("bring the yellow screwdriver")["tool"] == "flathead"
+    assert k.parse("hand me the green one")["tool"] == "torx"
+    assert k.parse("the clip applier please")["tool"] == "torx"
+    assert k.parse("phillips")["tool"] == "phillips" and k.parse("the red one")["tool"] == "phillips"
+    assert k.parse("stop")["intent"] == "stop" and k.parse("let go")["intent"] == "release"
+    assert k.parse("hello there")["tool"] is None
