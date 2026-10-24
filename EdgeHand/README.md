@@ -227,6 +227,13 @@ python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 phases.csv --headless
 python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 phases.csv                     # play + send to the arm on this laptop
 python -m edgehand.phase_player clip.mp4 phases.csv --host 192.168.55.100 --map "Clip application=flathead"   # from the Jetson
 ```
+**Making phases.csv.** `phase/predict_phases.py` runs the neurosurgical phase model ([veronicawang1/neurosurgical_phase_recognition](https://github.com/veronicawang1/neurosurgical_phase_recognition), aneurysm clipping, 4 phases: Brain Exposure, Parent Vessel Identification, Dome and Neck Identification, Clipping) on the clip. It follows the repo's pipeline: 1 FPS frames, fine-tuned ResNet50 features, MS-TCN (2×8 layers, 128 filters), then Viterbi with the repo's surgical-ordering prior, because the learned transition matrix needs the training labels. It needs the two trained weight files from the training VM:
+```bash
+uv venv phase/.venv --python 3.11 && uv pip install --python phase/.venv/bin/python -r phase/requirements.txt
+phase/.venv/bin/python phase/predict_phases.py --repo ../neurosurgical_phase_recognition --video ~/Desktop/clippingdemo.mp4 \
+    --backbone <finetuned_backbone.pt> --mstcn <best_mstcn.pt> --out data/phases/clippingdemo.csv   # ~40 s on an M-series Mac
+```
+
 **Other nodes** (`edgehand/link.py`). Small JSON events over UDP port `EVENT_UDP_PORT` (5006) to the laptop, which is the only computer that commands the arm: `request` (tool, source, phase), `release`, `stop`, and a `heartbeat` twice a second. Nodes send events, never motions. Plugging in the Jetson's USB-C gives the laptop 192.168.55.100 with no setup. A node that isn't plugged in just isn't heard, and the laptop carries on with typed requests. `run_kortex --listen` turns the listener on.
 
 ## 5. Settings
