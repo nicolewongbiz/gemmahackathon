@@ -369,11 +369,13 @@ def _grip_contours(hsv, ignore):
 
 
 def colour_class(hsv, contour):
-    """The TOOLS class whose HSV ranges cover most of the grip (at least half of it), else None."""
+    """The TOOLS class whose colour dominates the grip's saturated pixels, else None. A small accent (an orange cap,
+    a yellow collar on a black handle) is enough as long as it covers ACCENT_MIN_FRAC of the outline and no other
+    class's colour covers more."""
     m = np.zeros(hsv.shape[:2], np.uint8)
     cv2.drawContours(m, [contour], -1, 255, -1)
     n = max(1, np.count_nonzero(m))
-    best, frac = None, 0.5
+    best, frac = None, config.ACCENT_MIN_FRAC
     for name, ranges in config.TOOLS.items():
         f = np.count_nonzero(_mask(hsv, ranges) & m) / n
         if f > frac:

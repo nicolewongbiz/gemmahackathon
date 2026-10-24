@@ -80,3 +80,16 @@ def test_handle_side_grasp_is_two_cm_into_the_handle(monkeypatch):
     ferrule = np.array(g) + d * config.GRASP_FROM_FERRULE_M
     assert np.linalg.norm(t["grasp_xy"] - (ferrule + d * config.GRASP_FROM_FERRULE_M)) < 0.006
     assert t["handle_dir"] @ d > 0.99                                    # still points at the handle's free end
+
+
+def test_black_handle_with_an_orange_cap_is_phillips():
+    # a black precision screwdriver whose only colour is a 1.5 cm cap on the end of the handle
+    g, d = (0.45, 0.0), np.array([0.0, 1.0])
+    ferrule = np.array(g) + d * config.GRASP_FROM_FERRULE_M
+    cap_c = ferrule + d * 0.0925                                          # the last 1.5 cm of a 10 cm handle
+    n = np.array([-d[1], d[0]]) * 0.012
+    cap = [cap_c - d * 0.0075 + n, cap_c + d * 0.0075 + n, cap_c + d * 0.0075 - n, cap_c - d * 0.0075 - n]
+    img = synthetic.frame([("black", g, d)], mat=WHITE, extra=[(cap, (20, 90, 230))])   # BGR orange
+    tools = find_tools_contrast(img, tm_for(img))
+    assert len(tools) == 1 and tools[0]["colour"] == "phillips"
+    assert np.linalg.norm(tools[0]["grasp_xy"] - g) < 0.006

@@ -104,7 +104,7 @@ def test_touching_tools_of_different_colours_stay_separate(monkeypatch):
 
 
 def test_find_tools_unnamed_colour():
-    synthetic.COLOURS["mystery"] = (200, 80, 20)                         # blue handle, no TOOLS class
+    synthetic.COLOURS["mystery"] = (200, 40, 220)                        # magenta handle, no TOOLS class
     try:
         img = synthetic.frame([("mystery", (0.45, 0.0), (0, 1))])
     finally:
