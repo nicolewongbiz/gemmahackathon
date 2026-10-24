@@ -248,7 +248,7 @@ Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
 | `TOOL_DESCRIPTIONS` | "screwdriver with a red handle", … | what Gemma is told each tool looks like from above |
 | `VISION_NAMER` | "gemma" | "gemma" or "colour" |
 | `DEFAULT_TOOL` | phillips | what the REQUEST button asks for |
-| `CAMERA_SOURCE`, `CAMERA_USB_INDEX` | "usb", 0 | wrist camera: "usb" (RealSense), "rtsp" (Kinova Vision), "topic" |
+| `CAMERA_SOURCE`, `CAMERA_URL` | "url", http://192.168.55.1:8089/stream.mjpg | wrist camera: "url" = `cam_relay.py` on the Jetson serving the RealSense as MJPEG over the USB link (macOS only ever shows one of the D435's IR/colour cameras, chosen by a race at plug-in; Linux lists the colour one every time); "usb" (RealSense on this computer, by name), "rtsp", "topic" |
 | `LOOK_FLANGE_XYZ`, `LOOK_THETA` | (0.254, −0.043, 0.565), (174.3, −7.2, 89.8) | the look pose, measured on the real cell Oct 24 (Phase 1.5). The sim uses its own (0.40, 0, 0.62) because its camera mount differs |
 | `LOOK_SETTLE_S`, `LOCATE_SKIP_FRAMES` | 0.5, 5 | wait at the look pose; frames dropped after a locate request |
 | `TABLE_TAGS` | measured | tag centres (m, base frame) |
@@ -302,6 +302,7 @@ EdgeHand/
     test/run_integration.sh    all nodes (real Gemma) against fake_cell
     edgehand/kortex_robot.py   the Robot interface on the Kortex API (no ROS): rise-translate-descend free moves
     edgehand/run_kortex.py     no-ROS runner: camera → vision → Gemma → handover on kortex_robot (§3.1)
+    edgehand/cam_relay.py      runs ON the Jetson (stock python/opencv): RealSense colour → MJPEG over HTTP :8089
     test/test_kortex_robot.py  kortex_robot with the SDK replaced: angles, move ordering, refusals, units
   sim/handover.py              MuJoCo end-to-end test: wrist camera at the look pose → vision → handover → operator tug
 ```

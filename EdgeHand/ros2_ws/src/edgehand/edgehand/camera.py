@@ -1,6 +1,7 @@
 """The camera on the wrist (eye-in-hand). config.CAMERA_SOURCE picks it:
     "usb"  - a camera cabled to this computer, e.g. our Intel RealSense (its colour camera shows up as a UVC webcam)
     "rtsp" - the Kinova Vision module, rtsp://<ROBOT_IP>/color
+    "url"  - any stream OpenCV/FFmpeg can open: cam_relay.py on the Jetson serving the RealSense as MJPEG over HTTP
 A background thread keeps reading so the newest frame is always ready, and reconnects if the stream drops.
 
     python -m edgehand.camera --list      which OpenCV index is which camera (saves a snapshot of each)
@@ -44,6 +45,8 @@ def usb_cameras():
 
 
 def configured_source():
+    if config.CAMERA_SOURCE == "url":
+        return config.CAMERA_URL
     if config.CAMERA_SOURCE != "usb":
         return config.CAMERA_RTSP
     cams = usb_cameras()                             # by name: indexes shift when an iPhone etc. connects
