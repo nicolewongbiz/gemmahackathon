@@ -7,10 +7,12 @@ Runs on the computer the camera is cabled to (this Mac). Red E-stop in hand; Mov
     python -m edgehand.run_kortex --look-only           move to the look pose, show what vision sees, no pick
     python -m edgehand.run_kortex --namer colour        name tools by handle colour instead of Gemma
     python -m edgehand.run_kortex --namer first --tool x  ONE tool on the tray: whatever is found is the requested one
+    python -m edgehand.run_kortex --listen              also take requests / release / stop from other nodes over
+                                                        link.py (UDP 5006): the phase player, the Jetson voice node
 
 Refuses to pick on config.py's placeholder calibration: run measure_tags first (data/calibration.json).
 """
-import argparse, json, sys, tempfile, threading, time
+import argparse, json, queue, sys, tempfile, threading, time
 from pathlib import Path
 import cv2
 import numpy as np
@@ -39,6 +41,52 @@ def calibration_gate(allow_defaults):
     print(f"clearance {config.TABLE_CLEARANCE_M * 1000:.0f} mm, fingertips {config.FINGERTIP_CLOSED_M:.3f} m, "
           f"air gap {config.AIR_GAP_M * 1000:.0f} mm, empty-gripper threshold {config.GRIPPER_EMPTY_POS}, "
           f"segmentation {config.SEGMENTATION}")
+
+
+class Requests:
+    """Where tool requests come from: typed text (a thread reading stdin) and, with --listen, link.py events.
+    Events while a handover runs are dropped with a log line, never queued; stop and release act at once."""
+    def __init__(self, handover, log=print):
+        self.q, self.h, self.log = queue.Queue(), handover, log
+        self.busy = False
+        self.nodes = set()
+
+    def on_event(self, ev):
+        kind = ev.get("type")
+        src = ev.get("source") or ev.get("node") or "link"
+        if kind == "stop":
+            self.log(f"STOP from {src}")
+            if self.h:
+                self.h.stop()
+        elif kind == "release":
+            self.log(f"RELEASE from {src}")
+            if self.h:
+                self.h.release()
+        elif kind == "request":
+            tool = ev.get("tool")
+            if self.busy:
+                self.log(f"request for {tool!r} from {src} ignored: a handover is running")
+            elif tool not in config.TOOLS:
+                self.log(f"request for {tool!r} from {src} ignored: not a tool class {list(config.TOOLS)}")
+            else:
+                self.log(f"request from {src}: {tool}" + (f" (phase {ev['phase']})" if ev.get("phase") else ""))
+                self.q.put(("tool", tool))
+
+    def typed(self, text):
+        self.q.put(("text", text))
+
+    def next(self):
+        return self.q.get()
+
+
+def _read_stdin(requests):
+    while True:
+        try:
+            text = input("\nrequest> ").strip()
+        except EOFError:
+            return
+        if text:
+            requests.typed(text)
 
 
 class Eyes:
@@ -101,6 +149,7 @@ def main():
     ap.add_argument("--show", action="store_true", help="window with the detections")
     ap.add_argument("--allow-defaults", action="store_true")
     ap.add_argument("--robot", choices=["kortex", "none"], default="kortex", help="none = vision only")
+    ap.add_argument("--listen", action="store_true", help="take requests/release/stop over link.py too")
     a = ap.parse_args()
     if a.air:
         config.AIR_GAP_M = 0.03
@@ -146,18 +195,32 @@ def main():
                 if cv2.waitKey(500) == 27:
                     break
             return
+        requests = Requests(h)
+        listener = None
+        if a.listen:
+            from edgehand import link
+            listener = link.Listener(requests.on_event)
+            print(f"listening for nodes on UDP {config.EVENT_UDP_PORT}")
+        if not a.tool:
+            threading.Thread(target=_read_stdin, args=(requests,), daemon=True).start()
         while True:
             if a.tool:
                 tool = a.tool
             else:
-                text = input("\nrequest> ").strip()
-                if not text:
-                    continue
-                r = intent.parse(text)
-                print("gemma:", r["reply"])
-                tool = r["tool"]
-                if tool is None:
-                    continue
+                kind, val = requests.next()
+                if kind == "text":
+                    r = intent.parse(val)
+                    print("gemma:", r["reply"])
+                    tool = r["tool"]
+                    if tool is None:
+                        continue
+                else:
+                    tool = val
+            if listener is not None:
+                new = set(listener.alive()) - requests.nodes
+                if new:
+                    print("nodes connected:", ", ".join(sorted(new)))
+                    requests.nodes |= new
             if tool not in config.TOOLS:
                 print(f"unknown tool class {tool!r}; classes: {list(config.TOOLS)}")
                 if a.tool:
@@ -169,7 +232,11 @@ def main():
                 if a.tool:
                     return
                 continue
-            ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool))
+            requests.busy = True
+            try:
+                ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool))
+            finally:
+                requests.busy = False
             print("handover:", "OK" if ok else "FAILED", msg)
             if a.tool:
                 return
