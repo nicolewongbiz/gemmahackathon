@@ -10,7 +10,7 @@ Runs on the computer the camera is cabled to (this Mac). Red E-stop in hand; Mov
 
 Refuses to pick on config.py's placeholder calibration: run measure_tags first (data/calibration.json).
 """
-import argparse, json, sys, threading, time
+import argparse, json, sys, tempfile, threading, time
 from pathlib import Path
 import cv2
 import numpy as np
@@ -49,6 +49,7 @@ class Eyes:
         self.tm = TableMap()
         self.namer = namer
         self.want = None                       # the requested class, for --namer first
+        self.warned_ir = False
         self.last = None
 
     def _count(self, f):
@@ -64,9 +65,9 @@ class Eyes:
     def see(self, show):
         """[(tool dict with 'tool' name)], or None when not calibrated."""
         f = self.frame()
-        if f is not None and is_infrared(f):
-            print("CAMERA:", IR_HINT)
-            return None
+        if f is not None and is_infrared(f) and not self.warned_ir:
+            self.warned_ir = True                  # geometry still works in IR (tags, contrast); colour naming won't
+            print("CAMERA:", IR_HINT, "Carrying on in IR: use --namer first or gemma, not colour.")
         if f is None or not self.tm.update(f):
             print("NOT CALIBRATED:", getattr(self.tm, "why_not", lambda: "tags not found")())
             return None
@@ -84,6 +85,7 @@ class Eyes:
         print("vision:", ", ".join(f"{t['tool']} at ({t['grasp_xy'][0]:.3f}, {t['grasp_xy'][1]:.3f})" for t in tools)
               or "no tools")
         self.last = draw(f, self.tm, tools)
+        cv2.imwrite(str(Path(tempfile.gettempdir()) / "edgehand_last_look.jpg"), self.last)   # for debugging
         if show:
             cv2.imshow("edgehand", self.last)
             cv2.waitKey(1)
