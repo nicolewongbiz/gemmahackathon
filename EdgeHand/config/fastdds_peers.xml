@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Unicast discovery between the workstation and the Jetson over the USB link, for when multicast doesn't
+     cross it. On both machines: export FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/EdgeHand/config/fastdds_peers.xml -->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <participant profile_name="edgehand_peers" is_default_profile="true">
+    <rtps>
+      <builtin>
+        <initialPeersList>
+          <locator><udpv4><address>127.0.0.1</address></udpv4></locator>
+          <locator><udpv4><address>192.168.55.1</address></udpv4></locator>
+          <locator><udpv4><address>192.168.55.100</address></udpv4></locator>
+        </initialPeersList>
+      </builtin>
+    </rtps>
+  </participant>
+</profiles>

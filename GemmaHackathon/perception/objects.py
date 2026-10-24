@@ -44,7 +44,10 @@ def draw_marks(frame, objs, bins_px=None):
         cv2.putText(out, str(i), (c[0] - 9 if i < 10 else c[0] - 14, c[1] + 7),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     for name, (u, v) in (bins_px or {}).items():
-        cv2.putText(out, f"BIN {name}", (int(u) - 30, int(v) - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 3)
+        # White box clear of the tag (a 5 cm tag is ~90 px from LOOK_POSE) so Gemma can read it.
+        x, y = max(int(u) - 50, 0), max(int(v) - 65, 32)
+        cv2.rectangle(out, (x - 6, y - 32), (x + 106, y + 8), (255, 255, 255), -1)
+        cv2.putText(out, f"BIN {name}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
     return out
 
 

@@ -17,7 +17,7 @@ Return JSON: {{"rule": "<one sentence>", "bins": {{"A": "<what goes in A>", "B":
 
 PLAN = """Sorting rule: {rule}
 Bin A: {bin_a}. Bin B: {bin_b}.
-Numbered objects still on the table: {ids}.
+Numbered objects still on the table: {objects}.
 Pick ONE object to move next and choose its bin.
 Return JSON: {{"object": <number>, "label": "<what it is>", "bin": "A" or "B", "reason": "<few words>"}}
 If no numbered object fits either bin, return {{"object": null, "say": "<why>"}}"""
@@ -42,9 +42,12 @@ class Brain:
         self._save()
         return out.get("say") or f"Got it. {self.rule['rule']}"
 
-    def plan(self, marked_frame, ids):
+    def plan(self, marked_frame, ids, labels=None):
+        """labels: {id: "red apple"} from the eyes node's Gemma, a hint next to the image."""
+        labels = labels or {}
+        objects = ", ".join(f"{i} ({labels[i]})" if i in labels else str(i) for i in ids)
         p = PLAN.format(rule=self.rule["rule"], bin_a=self.rule["bins"].get("A"),
-                        bin_b=self.rule["bins"].get("B"), ids=ids)
+                        bin_b=self.rule["bins"].get("B"), objects=objects)
         out = gemma_vision.ask_json(p, [marked_frame], SYSTEM)
         if out.get("object") not in ids:
             out["object"] = None

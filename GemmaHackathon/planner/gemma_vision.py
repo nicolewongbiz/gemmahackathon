@@ -16,7 +16,7 @@ import config
 _engine = None
 
 
-def _litert_engine():
+def _litert_engine(model=None):
     global _engine
     if _engine is not None:
         return _engine
@@ -24,7 +24,7 @@ def _litert_engine():
     B = litert_lm.Backend
     # Measured on RTX 4070 / Windows, litert-lm-api 0.18.1: GPU text + CPU vision ≈ 3.5 s/call,
     # faster than GPU vision (≈ 5.4 s).
-    _engine = litert_lm.Engine(config.LITERT_MODEL, backend=B.GPU, vision_backend=B.CPU,
+    _engine = litert_lm.Engine(model or config.LITERT_MODEL, backend=B.GPU, vision_backend=B.CPU,
                                max_num_images=config.KEYFRAME_MAX)
     return _engine
 
@@ -41,8 +41,8 @@ def _shrink(img):
     return cv2.resize(img, (int(w * s), int(h * s))) if s < 1 else img
 
 
-def _ask_litert(prompt, images, system):
-    engine = _litert_engine()
+def _ask_litert(prompt, images, system, model=None):
+    engine = _litert_engine(model)
     content = [{"type": "image", "path": _save_tmp(im, i)} for i, im in enumerate(images)]
     content.append({"type": "text", "text": prompt})
     msgs = [{"role": "system", "content": system}] if system else []
@@ -51,28 +51,29 @@ def _ask_litert(prompt, images, system):
     return resp["content"][0]["text"]
 
 
-def _ask_ollama(prompt, images, system):
+def _ask_ollama(prompt, images, system, model=None):
     imgs = [base64.b64encode(cv2.imencode(".jpg", _shrink(im))[1]).decode() for im in images]
     msgs = ([{"role": "system", "content": system}] if system else []) + [
         {"role": "user", "content": prompt, "images": imgs}]
     r = requests.post(f"{config.OLLAMA_URL}/api/chat", json={
-        "model": config.OLLAMA_MODEL, "messages": msgs, "stream": False,
+        "model": model or config.OLLAMA_MODEL, "messages": msgs, "stream": False,
         "format": "json", "keep_alive": "2h", "options": {"temperature": 0.2}}, timeout=120)
     r.raise_for_status()
     return r.json()["message"]["content"]
 
 
-def ask(prompt, images=(), system=None, backend=None):
+def ask(prompt, images=(), system=None, backend=None, model=None):
+    """model: Ollama tag or .litertlm path; defaults to OLLAMA_MODEL / LITERT_MODEL."""
     backend = backend or config.GEMMA_BACKEND
     fn = _ask_litert if backend == "litert" else _ask_ollama
-    return fn(prompt, list(images), system)
+    return fn(prompt, list(images), system, model)
 
 
-def ask_json(prompt, images=(), system=None, backend=None, retries=2):
+def ask_json(prompt, images=(), system=None, backend=None, model=None, retries=2):
     """ask() and parse the first {...} block. Retries on bad JSON."""
     last = ""
     for _ in range(retries + 1):
-        last = ask(prompt, images, system, backend)
+        last = ask(prompt, images, system, backend, model)
         m = re.search(r"\{.*\}", last, re.S)
         if m:
             try:

@@ -55,10 +55,13 @@ class KinovaArm:
         self.base.SetServoingMode(mode)
 
     def _run(self, action):
+        self.stopped = False
         done = threading.Event()
+        result = {}
         B = self.Base_pb2
         def cb(n, e=done):
             if n.action_event in (B.ACTION_END, B.ACTION_ABORT):
+                result["event"] = n.action_event
                 e.set()
         h = self.base.OnNotificationActionTopic(cb, B.NotificationOptions())
         self.base.ExecuteAction(action)
@@ -66,6 +69,9 @@ class KinovaArm:
         self.base.Unsubscribe(h)
         if not ok:
             raise TimeoutError("Kinova action timed out")
+        if result["event"] == B.ACTION_ABORT and not self.stopped:
+            # unreachable pose or fault: don't let pick_and_place carry on as if it got there
+            raise ValueError("Kinova aborted the move")
 
     def move_to(self, x, y, z):
         check_workspace(x, y, z)
@@ -99,6 +105,7 @@ class KinovaArm:
                 return self._run(a)
 
     def stop(self):
+        self.stopped = True    # the abort this causes is expected; pick_and_place's should_stop ends the sequence
         self.base.Stop()
 
     def close(self):

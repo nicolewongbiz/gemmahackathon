@@ -5,12 +5,14 @@ Hackathon project (Gemma Hardware Hackathon, Oct 24 2026). A Kinova Gen3 learns 
 `README.md` is the single source of documentation: setup, calibration, run, demo, troubleshooting. Keep it in sync with code changes, and don't add separate doc files.
 
 ## Devices
-- Laptop: `main.py` FastAPI, perception, Gemma 4 E4B planner, Kortex arm control.
+A swarm on one switch (192.168.1.x):
+- Laptop (brain + hands): `main.py` FastAPI, Gemma 4 E4B planner, Kortex arm control. Gets scenes from the eyes through `perception/eyes.py`.
+- Jetson Orin Nano Super (eyes): `jetson/eyes_server.py` serves `LocalEyes` (camera, AprilTags, objects, teach keyframes) over HTTP, and labels objects with its own Gemma (Ollama). `EYES = "local"` runs the same `LocalEyes` on the laptop instead.
 - Camera: Kinova Vision module on the wrist, RTSP `rtsp://<ROBOT_IP>/color`. Eye-in-hand: call `arm.look()` before any perception frame. The old webcam reader is in `archive/webcam/` and is unused.
 - Raspberry Pi 5: `pi/voice_agent.py`, Gemma 4 E2B via LiteRT-LM, audio in → intent JSON.
 
 ## Without hardware
-Set `USE_MOCK_ARM = True` and `USE_MOCK_CAMERA = True` in `config.py`. Gemma still needs a backend (LiteRT model or Ollama).
+Set `USE_MOCK_ARM = True`, `USE_MOCK_CAMERA = True` and `EYES = "local"` in `config.py`. Gemma still needs a backend (LiteRT model or Ollama).
 
 ## Hard rules
 1. Gemma never outputs coordinates. It picks numbered marks and bin A/B, and geometry is deterministic.
@@ -20,4 +22,4 @@ Set `USE_MOCK_ARM = True` and `USE_MOCK_CAMERA = True` in `config.py`. Gemma sti
 5. Safety: slow moves, `stop` interrupts immediately.
 
 ## Measured on site
-`TABLE_TAGS`, `LOOK_POSE`, `Z_GRASP`, `TOOL_ORIENT`, `GRIPPER_CLOSED`. The laptop LiteRT config (GPU text + CPU vision, `gemma-4-E4B-it.litertlm`) is verified on Windows; the Pi's audio path is not.
+`TABLE_TAGS`, `LOOK_POSE`, `Z_GRASP`, `TOOL_ORIENT`, `GRIPPER_CLOSED`. The laptop LiteRT config (GPU text + CPU vision, `gemma-4-E4B-it.litertlm`) is verified on Windows; the Pi's audio path and the Jetson on real hardware are not.

@@ -1,0 +1,8 @@
+opencv-python
+pupil-apriltags
+numpy
+fastapi
+uvicorn
+requests
+# Gemma runs through Ollama (installed by setup_jetson.sh). Only needed if EYES_GEMMA_BACKEND = "litert":
+# litert-lm-api

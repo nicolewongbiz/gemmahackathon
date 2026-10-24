@@ -4,7 +4,7 @@ Push-to-talk: press ENTER (or wire a button to GPIO17 and set USE_GPIO=True).
 Audio goes straight into Gemma E2B (native audio input) -> JSON intent -> laptop.
 Laptop replies are polled from /say and spoken with espeak-ng.
 
-    python voice_agent.py --laptop 192.168.50.1
+    python voice_agent.py --laptop 192.168.1.11
     python voice_agent.py --text            # type commands instead (debug)
     python voice_agent.py --stt vosk        # fallback if E2B audio is too slow
 """
@@ -100,7 +100,7 @@ def wait_trigger():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--laptop", default="192.168.50.1")
+    ap.add_argument("--laptop", default="192.168.1.11")
     ap.add_argument("--stt", choices=["gemma", "vosk"], default="gemma")
     ap.add_argument("--text", action="store_true")
     a = ap.parse_args()

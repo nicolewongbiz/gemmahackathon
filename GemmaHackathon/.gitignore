@@ -5,3 +5,5 @@ pi/models/
 *.wav
 .venv/
 *.whl
+sim/menagerie/
+sim/out/
