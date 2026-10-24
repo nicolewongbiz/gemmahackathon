@@ -5,24 +5,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]          # EdgeHand/ (build with --symlink-install so this resolves)
 
 # ---- Tools: class -> handle colour (OpenCV HSV, hue 0-180). Red wraps around 0, so it has two ranges ----
-# The real tray (Oct 24): four precision screwdrivers. Two have BLACK handles with a small colour accent, so a
-# class is the dominant saturated colour on the grip (vision.colour_class), not "half the handle": the accent is
-# enough. Hue is OpenCV's 0-180. PROVISIONAL ranges until tuned on relay frames of the real tools on white paper.
+# The real tray (Oct 24): four precision screwdrivers. Two have BLACK handles with a small colour accent, and the
+# clear one is only identifiable by its blue collar, so a class is the dominant saturated colour on the grip
+# (vision.colour_class), not "half the handle". Hue is OpenCV's 0-180. Measured on relay frames of the real tools
+# on white paper at the look pose (hue 10/50/90 percentiles): green 72/74/77, red cap 0/1 (wraps to 179),
+# yellow collar 18/20/21, blue collar 105/108/112; paper, shafts and black handles have saturation < 20.
 TOOLS = {
-    "phillips": [((0, 110, 60), (20, 255, 255)), ((170, 110, 60), (180, 255, 255))],  # black handle, ORANGE cap
-    "flathead": [((22, 110, 60), (38, 255, 255))],                                      # black handle, YELLOW collar
-    "torx":     [((40, 70, 35), (90, 255, 255))],                                       # dark translucent GREEN handle
-    "clear":    [((95, 40, 40), (135, 255, 255))],                                      # clear BLUE handle
+    "phillips": [((0, 90, 60), (8, 255, 255)), ((170, 90, 60), (180, 255, 255))],    # black handle, RED cap
+    "flathead": [((12, 80, 70), (28, 255, 255))],                                      # black handle, YELLOW collar
+    "torx":     [((60, 70, 40), (90, 255, 255))],                                      # translucent GREEN handle
+    "clear":    [((95, 80, 30), (125, 255, 255))],                                     # clear handle, BLUE collar
 }
-ACCENT_MIN_FRAC = 0.03             # a class needs at least this share of the grip's pixels in its colour (a cap/collar)
+ACCENT_MIN_FRAC = 0.02             # a class needs at least this share of the grip's pixels in its colour (a cap/collar)
 DEFAULT_TOOL = "phillips"          # what the Pi REQUEST button asks for
 # What each tool looks like from above, in words, for Gemma naming the numbered tools (VISION_NAMER = "gemma").
 # Gemma can't see a screwdriver tip from the look pose, so describe what IS visible: the handle.
 TOOL_DESCRIPTIONS = {
-    "phillips": "precision screwdriver with a black handle and an orange cap on the end",
+    "phillips": "precision screwdriver with a black handle and a red cap on the end",
     "flathead": "precision screwdriver with a black handle and a yellow collar",
     "torx": "precision screwdriver with a dark green translucent handle",
-    "clear": "precision screwdriver with a clear blue translucent handle",
+    "clear": "precision screwdriver with a clear translucent handle and a blue collar",
 }
 
 # ---- Gemma 4 intent parser (LiteRT-LM, workstation) ----
