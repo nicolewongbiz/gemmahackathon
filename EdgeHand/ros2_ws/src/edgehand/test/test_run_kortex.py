@@ -18,18 +18,33 @@ class FakeHandover:
         self.released += 1
 
 
-def test_requests_queue_and_drop_while_busy():
+def test_requests_queue_and_keep_only_the_latest_while_busy():
     h, logs = FakeHandover(), []
     r = Requests(h, log=logs.append)
-    tool = next(iter(config.TOOLS))
-    r.on_event({"type": "request", "tool": tool, "source": "phase", "phase": "clipping"})
-    assert r.next() == ("tool", tool)
-    r.busy = True
-    r.on_event({"type": "request", "tool": tool, "source": "voice"})
-    assert r.q.empty() and any("ignored: a handover is running" in m for m in logs)
-    r.busy = False
+    tools = list(config.TOOLS)
+    a, b, c = tools[0], tools[1], tools[2]
+    r.on_event({"type": "request", "tool": a, "source": "phase", "phase": "clipping"})
+    assert r.next() == ("tool", a)
+    r.start(a)                                                       # handing over a; phases keep changing
+    r.on_event({"type": "request", "tool": a, "source": "voice"})    # same tool again: nothing to do
+    r.on_event({"type": "request", "tool": b, "source": "gemma-phase", "phase": "dome exposure"})
+    r.on_event({"type": "request", "tool": c, "source": "gemma-phase", "phase": "clipping"})
+    assert r.q.empty() and r.pending == (c, "gemma-phase")           # only the latest is kept
+    assert any("replaced by" in m for m in logs)
+    r.finish()
+    assert r.next() == ("tool", c) and r.pending is None and not r.busy
     r.on_event({"type": "request", "tool": "chainsaw", "source": "voice"})
     assert r.q.empty() and any("not a tool class" in m for m in logs)
+
+
+def test_pending_request_for_the_tool_just_handed_over_is_dropped():
+    r = Requests(FakeHandover(), log=lambda *a: None)
+    a, b = list(config.TOOLS)[:2]
+    r.start(a)
+    r.on_event({"type": "request", "tool": b})
+    r.on_event({"type": "request", "tool": a})                       # the latest asks for what is being handed over
+    r.finish()
+    assert r.q.empty()
 
 
 def test_stop_and_release_act_at_once():

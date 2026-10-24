@@ -285,7 +285,7 @@ python -m edgehand.run_kortex --listen --namer colour               # laptop, te
 python -m edgehand.assistant                                         # laptop, terminal 2 (the stage screen)
 python -m edgehand.assistant --local ~/Desktop/clippingdemo.mp4 ../../../data/phases/clippingdemo.csv   # no Jetson
 ```
-Requests that arrive during a handover are dropped by run_kortex, so a 67 s clip fits one or two handovers. Slow it with `--speed`, or loop it.
+Phases change faster than a handover (20–40 s), so `run_kortex` never queues requests: while a handover runs it keeps only the **latest** request pending (each newer one replaces it; one for the tool being handed over is dropped) and runs it once the operator has taken the tool. A 67 s clip therefore fits one or two handovers; slow it with `--speed`, or loop it.
 
 ## 5. Settings
 

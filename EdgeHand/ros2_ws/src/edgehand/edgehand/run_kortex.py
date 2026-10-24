@@ -45,10 +45,14 @@ def calibration_gate(allow_defaults):
 
 class Requests:
     """Where tool requests come from: typed text (a thread reading stdin) and, with --listen, link.py events.
-    Events while a handover runs are dropped with a log line, never queued; stop and release act at once."""
+    Phases change faster than a handover (20-40 s), so requests never pile up: while a handover runs, only the
+    LATEST request is kept as pending (each newer one replaces it) and it runs when the arm is free again; a pending
+    request for the tool just handed over is dropped. Stop and release act at once."""
     def __init__(self, handover, log=print):
         self.q, self.h, self.log = queue.Queue(), handover, log
         self.busy = False
+        self.current = None                   # the tool being handed over right now
+        self.pending = None                   # (tool, source) that arrived during the handover: the latest only
         self.nodes = set()
 
     def on_event(self, ev):
@@ -64,16 +68,39 @@ class Requests:
                 self.h.release()
         elif kind == "request":
             tool = ev.get("tool")
-            if self.busy:
-                self.log(f"request for {tool!r} from {src} ignored: a handover is running")
-            elif tool not in config.TOOLS:
+            where = f" (phase {ev['phase']})" if ev.get("phase") else ""
+            if tool not in config.TOOLS:
                 self.log(f"request for {tool!r} from {src} ignored: not a tool class {list(config.TOOLS)}")
+            elif self.busy:
+                if tool == self.current:
+                    self.log(f"request for {tool} from {src}{where}: already handing it over")
+                    self.pending = None
+                else:
+                    if self.pending and self.pending[0] != tool:
+                        self.log(f"pending request for {self.pending[0]} replaced by {tool} from {src}{where}")
+                    else:
+                        self.log(f"request for {tool} from {src}{where}: pending until the current handover ends")
+                    self.pending = (tool, src)
             else:
-                self.log(f"request from {src}: {tool}" + (f" (phase {ev['phase']})" if ev.get("phase") else ""))
+                self.log(f"request from {src}: {tool}{where}")
                 self.q.put(("tool", tool))
 
     def typed(self, text):
         self.q.put(("text", text))
+
+    def start(self, tool):
+        self.busy, self.current, self.pending = True, tool, None
+
+    def finish(self):
+        """The handover ended: the latest pending request (if any) becomes the next job, unless it's the same tool."""
+        self.busy, done = False, self.current
+        self.current = None
+        if self.pending:
+            tool, src = self.pending
+            self.pending = None
+            if tool != done:
+                self.log(f"now the pending request from {src}: {tool}")
+                self.q.put(("tool", tool))
 
     def next(self):
         return self.q.get()
@@ -235,11 +262,11 @@ def main():
                 if a.tool:
                     return
                 continue
-            requests.busy = True
+            requests.start(tool)
             try:
                 ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool))
             finally:
-                requests.busy = False
+                requests.finish()
             print("handover:", "OK" if ok else "FAILED", msg)
             if a.tool:
                 return
