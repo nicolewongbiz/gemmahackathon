@@ -256,9 +256,16 @@ def find_tools_contrast(frame, tmap):
     inner = np.zeros(tagm.shape, np.uint8)
     (u0, v0), (u1, v1) = (T @ [lo[0], hi[1], 1])[:2], (T @ [hi[0], lo[1], 1])[:2]   # table corners -> warped
     inner[int(min(v0, v1)):int(max(v0, v1)), int(min(u0, u1)):int(max(u0, u1))] = 255
-    bg = np.median(img[(tagm == 0) & (inner > 0)].reshape(-1, 3), axis=0)
+    # what the camera actually sees: outside it the warp is black fill. Anything touching that edge (the gripper
+    # fingers at the bottom of every frame, a hand reaching in) isn't a tool on the tray.
+    seen = cv2.warpPerspective(np.full(frame.shape[:2], 255, np.uint8), T @ tmap.H, (img.shape[1], img.shape[0]))
+    seen = cv2.erode(seen, np.ones((5, 5), np.uint8))
+    cv2.rectangle(seen, (0, 0), (img.shape[1] - 1, img.shape[0] - 1), 0, 2)      # the warp's own border too
+    unseen = seen == 0
+    bg = np.median(img[(tagm == 0) & (inner > 0) & ~unseen].reshape(-1, 3), axis=0)
     diff = np.abs(img.astype(np.int16) - bg.astype(np.int16)).max(axis=2)
-    mask = ((diff > config.CONTRAST_MIN) & (tagm == 0)).astype(np.uint8) * 255
+    mask = ((diff > config.CONTRAST_MIN) & (tagm == 0) & ~unseen).astype(np.uint8) * 255
+    edge = cv2.dilate(unseen.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
     k3 = max(3, int(0.0015 * k)) | 1
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((k3, k3), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((k3 + 2, k3 + 2), np.uint8))
@@ -268,11 +275,10 @@ def find_tools_contrast(frame, tmap):
         area_m2 = cv2.contourArea(c) / k / k
         if area_m2 < config.TOOL_MIN_AREA_M2:
             continue
-        x, y, w, h = cv2.boundingRect(c)
-        if x <= 1 or y <= 1 or x + w >= img.shape[1] - 1 or y + h >= img.shape[0] - 1:
-            continue                                              # touches the edge: the gripper, or something coming in
         filled = np.zeros(mask.shape, np.uint8)
         cv2.drawContours(filled, [c], -1, 255, -1)
+        if np.any(edge[filled > 0]):
+            continue                                              # touches the edge of the view: the gripper, a hand
         pts = np.argwhere(filled > 0)[:, ::-1].astype(float)       # (u, v)
         centre = pts.mean(axis=0)
         axis = np.linalg.svd(pts - centre, full_matrices=False)[2][0]
