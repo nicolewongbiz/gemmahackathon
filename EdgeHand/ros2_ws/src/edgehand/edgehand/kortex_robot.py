@@ -90,7 +90,10 @@ class KortexRobot:
             transport.connect(ip, port)
             info = Session_pb2.CreateSessionInfo()
             info.username, info.password = "admin", "admin"
-            info.session_inactivity_timeout, info.connection_inactivity_timeout = 600000, 2000
+            # connection_inactivity_timeout is how long the arm tolerates SILENCE on the socket before closing it.
+            # 2 s (Kinova's example value) broke the pipe while holding for the tug: all polling then goes over the
+            # UDP feedback channel and the TCP channel goes quiet. wait() also keeps it alive.
+            info.session_inactivity_timeout, info.connection_inactivity_timeout = 600000, 60000
             sm = SessionManager(router)
             sm.CreateSession(info)
             self._sessions.append((sm, transport))
@@ -291,7 +294,16 @@ class KortexRobot:
         return self.unfold_if_needed() and self.move_free(*look_pose())
 
     def wait(self, seconds):
+        """Sleep, and keep the TCP session alive with a cheap state read at most once a second (the hold loop waits
+        in 20 ms steps for as long as the operator takes)."""
         time.sleep(seconds)
+        now = time.time()
+        if now - getattr(self, "_last_tcp", 0.0) > 1.0:
+            self._last_tcp = now
+            try:
+                self.base.GetArmState()
+            except Exception as e:                    # don't let a keep-alive kill the hold loop
+                self.log(f"kortex: keep-alive failed: {e}")
 
     def cancel(self):
         self._stopped = True
