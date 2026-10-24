@@ -16,7 +16,7 @@ This README is the single source of documentation for EdgeHand: spec, setup, run
 | 6 | Launch `kortex_bringup` **and** MoveIt | The MoveIt launch already starts `ros2_control_node` with the Kinova hardware interface. Two launches = two drivers on one arm | Launch only `kinova_gen3_7dof_robotiq_2f_85_moveit_config robot.launch.py` |
 | 7 | ROS 2 "Humble/Iron" on the workstation | Iron is end-of-life. MoveIt 2 needs Linux, and this team's laptop setup is Windows | **Humble on Ubuntu 22.04** (dual-boot the Legion) |
 | 8 | Pi 4 over USB-C gadget | Pi 4's USB-C port is also its power input. A laptop port rarely gives the 3 A it needs, so it browns out. ROS 2 on Raspberry Pi OS also has no Humble binaries | Pi on its own 5 V / 3 A supply, wired to a USB-Ethernet adapter on the workstation. The Pi runs plain Python and sends UDP; `pi_bridge` on the workstation turns that into ROS topics |
-| 9 | Pose targets for "the tool" | MoveIt's `manipulator` group ends at `end_effector_link` (the flange), ~17 cm behind the fingertips, and the 2F-85 fingertips move ~13 mm further out as they close | Targets are computed for the flange from the grasp point and `TCP_OFFSET_M` = closed fingertip distance + 4 mm − tool radius. With 0.15 the sim drove the pads into the table |
+| 9 | Pose targets for "the tool" | MoveIt's `manipulator` group ends at `end_effector_link` (the flange), ~17 cm behind the fingertips, and the 2F-85 fingertips move ~13 mm further out as they close | Targets are computed for the flange from the grasp point and `TCP_OFFSET_M` = closed fingertip distance + `TABLE_CLEARANCE_M` − tool radius, and refused if the closed fingertips would come closer than that to the table (§2.3.1). With 0.15 the sim drove the pads into the table |
 | 10 | Camera on the Jetson | The camera on this cell is on the arm's wrist | The arm moves to the look pose before every frame and waits there between handovers |
 | 11 | MoveIt plans "collision-free" | MoveIt only avoids what's in its planning scene, and by default that has no table and no tools | `handover_node` adds the table and a keep-out box over the tool tray at startup. Only the short vertical descend/lift run with collision checking off |
 | 12 | Vision publishes a pose; the planner uses it | Which frame is fresh? With no network time on an air-gapped cell, timestamps from two machines can't be compared | `handover_node` sends `/edgehand/locate` with an id after the arm has settled at the look pose. `vision_node` answers with the same id, from a frame it received after the request |
@@ -87,6 +87,18 @@ There's no switch and no Wi-Fi.
 - Flange targets = grasp point − `TCP_OFFSET_M` along the tool z axis. The gripper points straight down for picking, with the fingers (`FINGERS_ALONG`) closing across the shaft.
 - At startup `handover_node` adds the table and a `TRAY_KEEPOUT_H` box over the tag rectangle to the planning scene (`/apply_planning_scene`). Free moves stay out of the tray; only the vertical descend/lift use `avoid_collisions: false`.
 - Gripper: `/robotiq_gripper_controller/gripper_cmd` (`control_msgs/GripperCommand`, 0.0 open … 0.8 closed).
+- **Missed grasps:** after the lift, a finger position (`GRIPPER_JOINT` in `/joint_states`) past `GRIPPER_EMPTY_POS` means nothing is between the fingers. The arm opens, goes back to the look pose, asks vision again and retries, up to `PICK_ATTEMPTS` picks, then says it missed. Off with `use_fake_hardware:=true` (mock fingers always close fully).
+
+### 2.3.1 Never hitting the table
+The lowest the gripper ever gets is its closed fingertips (the 2F-85 tips move ~13 mm further out as they close). The layers:
+
+1. **Clearance.** Every grasp puts the closed fingertips `TABLE_CLEARANCE_M` (6 mm) above the table. `plan_targets` computes the fingertip height of every target and refuses the whole pick, before any motion, if one would be lower.
+2. **Table height measured with the fingertips.** `TABLE_TOUCH_Z` (Phase 1.6) holds the flange height with the closed fingertips touching each tag. The plane through them follows a tilted table, and because the same arm measured it, ruler error in `FINGERTIP_CLOSED_M` and the arm's own z offset cancel out of the grasp height. A 1° tilt across the tray is 4 mm, almost the whole margin, so don't skip this.
+3. **Planning-scene table 6 mm above the real one,** with a hole around the base, so `move_group` keeps every link that high on free moves. (Before, its top was 5 mm *below* the table so the base wouldn't collide.)
+4. **Slow last 3 cm.** The descent switches to `DESCEND_SLOW_SCALE` (5%) for the final `DESCEND_SLOW_M`, so a wrong height touches gently with time to hit the E-stop.
+5. **Air run first** (`AIR_GAP_M = 0.03`, Phase 3): the whole sequence runs with every grasp 3 cm above the tools.
+
+Measured in MuJoCo (§6): the lowest gripper point is 0.7 mm below the nominal clearance (pad shape), so 5.3 mm with the default. Picks work the same from 4 to 10 mm clearance in sim; above ~6 mm the pads hold the shaft with only their bottom edge, which a real gripper is less forgiving of.
 
 ### 2.4 Handover and release
 - `HANDOVER_XYZ` is a fixed point at the operator's chest height, away from their face. The tool is rotated so the handle points along `OPERATOR_DIR` (towards the operator).
@@ -166,7 +178,9 @@ There's no switch and no Wi-Fi.
 4. **Tags.** Tape tags 0–3 at the tray corners, flat on the dark mat. Jog the gripper fingertip onto each tag centre in the Kinova Web App, read x, y and enter them in `TABLE_TAGS`. Also record the table height for `TABLE_Z`.
 5. **Look pose.** In the Web App, move the tool to (0.40, 0, 0.50) with θ (180, 0, 90). The Web App shows the 0.12 m tool frame; `LOOK_FLANGE_XYZ` is the flange, 0.12 m higher. Run `python -m edgehand.camera`: it must show **CALIBRATED** with all 4 tags outlined. If a tag is cut off or hidden by the fingers, move the tag inwards (and re-measure) or adjust the pose, then copy it into `LOOK_FLANGE_XYZ` / `LOOK_THETA`. Straight down above about z 0.50 (tool frame) is out of reach.
 6. **Gripper geometry** (the sim found both of these matter):
-   - Close the gripper and measure the flange face → fingertip distance *d* (ruler, or `ros2 run tf2_ros tf2_echo end_effector_link robotiq_85_left_finger_tip_link` with the gripper closed). Set `TCP_OFFSET_M = d + 0.004 − TOOL_RADIUS_M`.
+   - Close the gripper and measure the flange face → fingertip distance *d* (ruler, or `ros2 run tf2_ros tf2_echo end_effector_link robotiq_85_left_finger_tip_link` with the gripper closed). Set `FINGERTIP_CLOSED_M = d`; `TCP_OFFSET_M` follows from it.
+   - **Table height, with the fingertips** (§2.3.1). Gripper closed, pointing straight down (θ 180, 0, 90), a sheet of paper on tag 0. Jog down in small steps until the paper is pinched under the fingertips, then read the flange z: `ros2 run tf2_ros tf2_echo base_link end_effector_link`, or the Web App's z + 0.12 (it shows the tool frame). Repeat on tags 1–3 and enter all four in `TABLE_TOUCH_Z`. If one differs from the others by more than a few mm, the mat isn't flat: fix that first.
+   - **Empty vs holding.** Close the gripper on nothing, then on the thinnest shaft you'll use, and read `GRIPPER_JOINT` each time (`ros2 topic echo /joint_states`). Check the joint name is there, and set `GRIPPER_EMPTY_POS` halfway between the two (sim: 0.782 empty, 0.745 on a 6 mm shaft).
    - Open and close the gripper in RViz with the `end_effector_link` axes shown: set `FINGERS_ALONG` to the flange axis ("x" or "y") the fingers move along.
 7. **Tool descriptions.** Write what each real tool looks like from above in `TOOL_DESCRIPTIONS`, e.g. "screwdriver with a red and black handle".
 
@@ -177,8 +191,9 @@ There's no switch and no Wi-Fi.
 
 ### Phase 3: Dry run
 1. Mock hardware: `ros2 launch edgehand workstation.launch.py robot_ip:=0.0.0.0 use_fake_hardware:=true`. Use the RELEASE button, because there are no torques.
-2. MuJoCo, no ROS needed: from `EdgeHand/`, `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20`. It runs the wrist camera at the look pose, vision, grasp, handover and tug release on a simulated Gen3 (§6).
-3. Real arm at 20% scaling, E-stop in hand. Tune `TUG_TORQUE_NM` with `ros2 topic echo /edgehand/state`, which prints the live Δτ.
+2. MuJoCo, no ROS needed: from `EdgeHand/`, `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20` (add `--miss` to aim the first grasp past the tool and check the retry). It runs the wrist camera at the look pose, vision, grasp, handover and tug release on a simulated Gen3, and prints the closest the gripper got to the table (§6).
+3. **Air run on the real arm:** `AIR_GAP_M = 0.03`, 20% scaling, E-stop in hand. Every pick closes 3 cm above its tool. Check the fingers end up centred over the shaft and across it, and the gripper height looks right, for tools in every corner of the tray. Then set `AIR_GAP_M = 0.0`.
+4. Real arm at 20% scaling, E-stop in hand. Tune `TUG_TORQUE_NM` with `ros2 topic echo /edgehand/state`, which prints the live Δτ.
 
 ## 5. Settings
 
@@ -193,10 +208,18 @@ Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
 | `CAMERA_SOURCE`, `CAMERA_USB_INDEX` | "usb", 0 | wrist camera: "usb" (RealSense), "rtsp" (Kinova Vision), "topic" |
 | `LOOK_FLANGE_XYZ`, `LOOK_THETA` | (0.40, 0, 0.62), (180, 0, 90) | the look pose: flange position, Kortex angles (Phase 1.5) |
 | `LOOK_SETTLE_S`, `LOCATE_SKIP_FRAMES` | 0.5, 5 | wait at the look pose; frames dropped after a locate request |
-| `TABLE_TAGS`, `TABLE_Z` | measured | tag centres (m, base frame), table height |
+| `TABLE_TAGS` | measured | tag centres (m, base frame) |
+| `TABLE_TOUCH_Z` | {} (measure) | flange z with the closed fingertips touching each tag (Phase 1.6); a plane through them is the table. Empty = flat at `TABLE_Z` |
+| `TABLE_CLEARANCE_M` | 0.006 | closed fingertips above the table at the bottom of every pick; lower targets are refused (§2.3.1) |
+| `FINGERTIP_CLOSED_M` | 0.173 | flange → closed fingertips (Phase 1.6) |
+| `AIR_GAP_M` | 0.0 | 0.03 for the first real runs: every grasp 3 cm above the tools, no grasp check |
+| `DESCEND_SLOW_M`, `DESCEND_SLOW_SCALE` | 0.03, 0.05 | the last 3 cm of each descent at 5% speed |
+| `GRIPPER_JOINT`, `GRIPPER_EMPTY_POS` | robotiq_85_left_knuckle_joint, 0.765 | finger position past this after the lift = missed grasp (Phase 1.6) |
+| `PICK_ATTEMPTS` | 3 | picks per request; after a miss the arm looks again |
+| `BASE_HOLE_M` | 0.08 | half-width of the hole in the planning-scene table around the base |
 | `TOOL_RADIUS_M` | 0.012 | z of the grasp above the table (shaft/handle radius) |
 | `GRASP_FROM_FERRULE_M` | 0.02 | grasp point on the shaft, measured from the handle |
-| `TCP_OFFSET_M` | 0.165 | flange → grasp point along tool z: closed fingertip distance + 4 mm − `TOOL_RADIUS_M` (Phase 1.6) |
+| `TCP_OFFSET_M` | 0.167 (derived) | flange → grasp point along tool z = `FINGERTIP_CLOSED_M + TABLE_CLEARANCE_M − TOOL_RADIUS_M` |
 | `FINGERS_ALONG` | "x" | flange axis the fingers close along (Phase 1.6) |
 | `TRAY_KEEPOUT_H` | 0.06 | height of the planning-scene box over the tool tray |
 | `SHAFT_MIN_VAL`, `SHAFT_MAX_SAT` | 140, 70 | HSV: a shaft is bright and unsaturated; a lit dark mat must stay below `SHAFT_MIN_VAL` |
@@ -238,12 +261,14 @@ EdgeHand/
 
 | Test | Command (from `EdgeHand/ros2_ws/src/edgehand/`) | Result |
 |---|---|---|
-| Unit tests | `python -m pytest test/test_core.py` | 24/24 |
+| Unit tests | `python -m pytest test/test_core.py` | 33/33 |
 | Gemma 4 E4B intent, 7 phrasings ("cross-head", "the flat one", "star", a hammer, off-topic) | `python -m edgehand.intent <model> < phrases.txt` | 7/7 correct, ~1.4 s each |
 | Gemma naming tools on synthetic trays (1–3 screwdrivers, plus a blue tool that isn't on the list) | 20 trays | 38/43 named correctly (88%), ~4.6 s per tray. Misses: the unlisted tool called a listed one (3), number mix-ups (2) |
-| All nodes vs fake MoveIt, vision from a camera topic: text → Gemma → look → locate → Gemma names → MoveIt → tug → release; STOP mid-move; Pi REQUEST + RELEASE over UDP; a tool that isn't there | `bash test/run_integration.sh` | 4/4 |
+| All nodes vs fake MoveIt, vision from a camera topic: text → Gemma → look → locate → Gemma names → MoveIt → tug → release; STOP mid-move; Pi REQUEST + RELEASE over UDP; a tool that isn't there; a grasp that closes on nothing (looks again, picks again) | `bash test/run_integration.sh` | 5/5 |
 | Pi watchdog | heartbeats stop | `/edgehand/stop` within 0.45 s, none while beating |
-| MuJoCo, wrist camera at the look pose, random tool poses: vision → pick → present → 12 N tug | from `EdgeHand/`: `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20` (needs the sim venv and models from `GemmaHackathon/README.md` §10) | 20/20, vision ≤ 4.2 mm, handle towards the operator every time, release 0.1 s after the pull, no table contact |
+| MuJoCo, wrist camera at the look pose, random tool poses: vision → pick → present → 12 N tug | from `EdgeHand/`: `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20` (needs the sim venv and models from `GemmaHackathon/README.md` §10) | 20/20, vision ≤ 4.2 mm, handle towards the operator every time, release 0.1 s after the pull, no table contact, gripper never lower than 5.3 mm above the table |
+| MuJoCo, first grasp aimed 12 cm past the tool (closes on air) | `... -m sim.handover --trials 10 --miss` | 10/10 seen as a miss, looked again, picked on the second try; never lower than 5.3 mm |
+| MuJoCo multi-tool trays with the table-safety changes, colour naming, intent stubbed | `-m sim.tools` trial() with a stub intent, 18 trays | 18/18 handed over, no contacts, never lower than 5.3 mm (hammer 6.3 mm, pliers / wrench 7.3 mm+) |
 | MuJoCo multi-tool trays, real Gemma 4 E4B for intent and naming: 4 tools per tray from 6 classes (adds sim-only pliers, wrench, hammer) | from `EdgeHand/`: `-m sim.tools` | Wrist camera + Gemma naming: **29/30 end to end (97%)**, tools found and named 120/120, grasp + handover 22/22, 0 collisions. Before, with the overhead camera and colour naming: 56/60 (93%). Phrase battery 55/59 (93%) |
 | Real arm, read-only (no motion) | Kortex probe | see "Measured on the real arm" above |
 
@@ -262,7 +287,9 @@ In the multi-tool sim the remaining misses are all in intent, for the sim-only p
 | Tool found but named wrong | Make `TOOL_DESCRIPTIONS` say what's visible from above (handle colours and shape). Or `namer:=colour` with tuned `TOOLS` HSV ranges |
 | Gemma calls time out | Another process is using the GPU (a second Gemma, a sim); LiteRT gives up after 2 min. Run one at a time |
 | Two drivers / controller_manager errors | Only the MoveIt launch should run; kill any `kortex_bringup` launch |
-| Arm grips air / hits the tray | `TCP_OFFSET_M` (Phase 1.6) and `TABLE_Z` |
+| Arm grips air / hits the tray | `FINGERTIP_CLOSED_M` and `TABLE_TOUCH_Z` (Phase 1.6); do an air run (Phase 3.3) |
+| "… puts the fingertips … mm above the table" | A target was refused for being too low: check `TABLE_TOUCH_Z`, `TOOL_RADIUS_M`, and that `TCP_OFFSET_M` wasn't overridden |
+| "missed the tool" every time | `GRIPPER_EMPTY_POS` too low, or `GRIPPER_JOINT` not in `/joint_states` (Phase 1.6) |
 | Releases on its own | Raise `TUG_TORQUE_NM`, or wait longer before the baseline is taken (`SETTLE_S`) |
 | Never releases on a tug | Lower `TUG_TORQUE_NM`; check `/joint_states` efforts aren't zero (they are with fake hardware) |
 | Arm stops by itself | Pi watchdog: is `edgehand_pi.py` running, and is `pi_bridge` getting heartbeats? |

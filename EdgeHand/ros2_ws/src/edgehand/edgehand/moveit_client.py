@@ -1,9 +1,10 @@
 """The handover Robot interface on top of MoveIt 2 (Humble) and ros2_kortex.
 
     move_free  -> move_group action /move_action (pose goal for EE_LINK)
-    move_line  -> /compute_cartesian_path, slowed to VEL_SCALE, then /execute_trajectory
-    add_scene  -> /apply_planning_scene: table + keep-out box over the tool tray
+    move_line  -> /compute_cartesian_path, slowed to VEL_SCALE (or the given scale), then /execute_trajectory
+    add_scene  -> /apply_planning_scene: table (raised by TABLE_CLEARANCE_M) + keep-out box over the tool tray
     gripper    -> /robotiq_gripper_controller/gripper_cmd
+    grip_position -> /joint_states position of GRIPPER_JOINT
     efforts    -> /joint_states effort (measured joint torques)
 
 Blocking calls are made from a worker thread while a MultiThreadedExecutor spins the node.
@@ -22,7 +23,7 @@ from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
 from edgehand import config
-from edgehand.geometry import look_pose, quat_from_R
+from edgehand.geometry import look_pose, quat_from_R, table_z
 
 def pose_msg(p, R):
     m = Pose()
@@ -60,6 +61,7 @@ class MoveItRobot:
         self.cartesian = node.create_client(GetCartesianPath, "/compute_cartesian_path")
         self.scene = node.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self._efforts = {}
+        self._grip_pos = None
         self._goal = None                        # current goal handle, for cancel()
         self._lock = threading.Lock()
         node.create_subscription(JointState, "/joint_states", self._on_joints, 10)
@@ -67,18 +69,28 @@ class MoveItRobot:
     def _on_joints(self, msg):
         if msg.effort:
             self._efforts.update(zip(msg.name, msg.effort))
+        if config.GRIPPER_JOINT in msg.name and len(msg.position) == len(msg.name):
+            self._grip_pos = msg.position[msg.name.index(config.GRIPPER_JOINT)]
 
     def wait_for_servers(self, timeout=30.0):
         ok = all(c.wait_for_server(timeout_sec=timeout) for c in (self.move, self.execute, self.grip))
         return ok and self.cartesian.wait_for_service(timeout_sec=timeout)
 
     def add_scene(self):
-        """Table (top just under TABLE_Z so the base doesn't touch it) and the tray keep-out box."""
+        """The table, TABLE_CLEARANCE_M above the real one so free moves keep every link at least that high, as 4
+        boxes around a hole where the base stands on it; and the tray keep-out box."""
         xs = [p[0] for p in config.TABLE_TAGS.values()]
         ys = [p[1] for p in config.TABLE_TAGS.values()]
-        boxes = {"table": ((1.6, 1.6, 0.02), (0.3, 0.0, config.TABLE_Z - 0.015)),
-                 "tray": ((max(xs) - min(xs) + 0.1, max(ys) - min(ys) + 0.1, config.TRAY_KEEPOUT_H),
-                          ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, config.TABLE_Z + config.TRAY_KEEPOUT_H / 2))}
+        x0, x1, y0, y1, b = -0.5, 1.1, -0.8, 0.8, config.BASE_HOLE_M
+        top = max(table_z(x, y) for x in (x0, x1) for y in (y0, y1)) + config.TABLE_CLEARANCE_M   # highest corner
+        slabs = {"table_front": (b, x1, y0, y1), "table_back": (x0, -b, y0, y1),
+                 "table_left": (-b, b, b, y1), "table_right": (-b, b, y0, -b)}
+        boxes = {n: ((xb - xa, yb - ya, 0.02), ((xa + xb) / 2, (ya + yb) / 2, top - 0.01))
+                 for n, (xa, xb, ya, yb) in slabs.items()}
+        zs = [table_z(*p) for p in config.TABLE_TAGS.values()]
+        lo, hi = min(zs), max(zs) + config.TRAY_KEEPOUT_H
+        boxes["tray"] = ((max(xs) - min(xs) + 0.1, max(ys) - min(ys) + 0.1, hi - lo),
+                         ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (lo + hi) / 2))
         req = ApplyPlanningScene.Request()
         req.scene.is_diff = True
         req.scene.robot_state.is_diff = True
@@ -139,7 +151,7 @@ class MoveItRobot:
         c.position_constraints, c.orientation_constraints = [pc], [oc]
         return self._plan_and_go(c)
 
-    def move_line(self, p, R, collisions=True):
+    def move_line(self, p, R, collisions=True, scale=None):
         req = GetCartesianPath.Request()
         req.header.frame_id = config.BASE_FRAME
         req.start_state.is_diff = True
@@ -150,7 +162,7 @@ class MoveItRobot:
         if res.fraction < 0.99:
             self.node.get_logger().error(f"cartesian path only {res.fraction:.0%} feasible")
             return False
-        slow_down(res.solution.joint_trajectory, config.VEL_SCALE)
+        slow_down(res.solution.joint_trajectory, scale or config.VEL_SCALE)
         goal = ExecuteTrajectory.Goal()
         goal.trajectory = res.solution
         r = self._send(self.execute, goal)
@@ -162,6 +174,9 @@ class MoveItRobot:
         r = self._send(self.grip, goal)
         # closing on a tool stalls before reaching the setpoint: that's a successful grasp
         return r is not None and (r.reached_goal or r.stalled)
+
+    def grip_position(self):
+        return self._grip_pos
 
     def look(self):
         return self.move_free(*look_pose())

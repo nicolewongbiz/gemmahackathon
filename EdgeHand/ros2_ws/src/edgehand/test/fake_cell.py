@@ -2,7 +2,9 @@
 without hardware or MoveIt:
     /move_action, /execute_trajectory, /robotiq_gripper_controller/gripper_cmd   (succeed, log the goal)
     /compute_cartesian_path, /apply_planning_scene                                (succeed)
-    /joint_states with efforts; publish std_msgs/Empty on /test/pull to simulate the operator's tug
+    /joint_states with efforts and the gripper (closing stops on a tool: GRIPPER_HOLDING_POS);
+    publish std_msgs/Empty on /test/pull to simulate the operator's tug, on /test/miss_next for the next close to
+    find nothing (fingers close fully)
     config.CAMERA_TOPIC: synthetic tray frame with a phillips and a flathead screwdriver (test/synthetic.py)
 """
 import sys, threading, time
@@ -27,6 +29,7 @@ import synthetic                                                      # noqa: E4
 from edgehand import config                                           # noqa: E402
 
 JOINTS = [f"joint_{i}" for i in range(1, 8)]
+GRIPPER_HOLDING_POS = 0.70                # fingers stopped by a shaft
 
 
 class FakeCell(Node):
@@ -34,6 +37,8 @@ class FakeCell(Node):
         super().__init__("fake_cell")
         self.motion_s = motion_s
         self.pulling = False
+        self.grip_pos = 0.0
+        self.miss_next = False
         cb = ReentrantCallbackGroup()
         self.log_pub = self.create_publisher(String, "/test/log", 50)
         ActionServer(self, MoveGroup, "/move_action", self.on_move, callback_group=cb,
@@ -46,6 +51,7 @@ class FakeCell(Node):
         self.js = self.create_publisher(JointState, "/joint_states", 10)
         self.img = self.create_publisher(Image, config.CAMERA_TOPIC, 1)
         self.create_subscription(Empty, "/test/pull", lambda _: setattr(self, "pulling", True), 10)
+        self.create_subscription(Empty, "/test/miss_next", lambda _: setattr(self, "miss_next", True), 10)
         self.frame = synthetic.frame([("phillips", grasp_xy, handle_dir),
                                       ("flathead", (0.47, -0.10), (1.0, 0.0))])[:, :, ::-1].copy()   # BGR -> rgb8
         self.create_timer(0.02, self.pub_joints)
@@ -94,9 +100,15 @@ class FakeCell(Node):
         self.log(f"gripper -> {gh.request.command.position}")
         if gh.request.command.position == 0.0:
             self.pulling = False                              # the operator has the tool now
+        self.grip_pos = min(gh.request.command.position, GRIPPER_HOLDING_POS)
+        if gh.request.command.position == config.GRIPPER_CLOSED and self.miss_next:
+            self.miss_next, self.grip_pos = False, config.GRIPPER_CLOSED
+            self.log("gripper closed on nothing")
         gh.succeed()
         res = GripperCommand.Result()
-        res.reached_goal = True
+        res.position = self.grip_pos
+        res.reached_goal = self.grip_pos == gh.request.command.position
+        res.stalled = not res.reached_goal
         return res
 
     def on_cartesian(self, req, res):
@@ -119,7 +131,8 @@ class FakeCell(Node):
         tau = np.array([0.0, 12.0, 0.0, 6.0, 0.3, -1.0, 0.0]) + np.random.normal(0, 0.05, 7)
         if self.pulling:
             tau[5] -= 3.0                                     # wrist joint feels the pull
-        m = JointState(name=JOINTS, position=[0.0] * 7, velocity=[0.0] * 7, effort=list(map(float, tau)))
+        m = JointState(name=JOINTS + [config.GRIPPER_JOINT], position=[0.0] * 7 + [self.grip_pos],
+                       velocity=[0.0] * 8, effort=list(map(float, tau)) + [0.0])
         m.header.stamp = self.get_clock().now().to_msg()
         self.js.publish(m)
 

@@ -68,6 +68,30 @@ def flange_from_tcp(p_tcp, R):
     return np.asarray(p_tcp, float) - R[:, 2] * config.TCP_OFFSET_M
 
 
+def table_z(x, y):
+    """Table surface height at (x, y): the plane through TABLE_TOUCH_Z (minus the fingertips), else TABLE_Z."""
+    touch = config.TABLE_TOUCH_Z
+    if not touch:
+        return config.TABLE_Z
+    if len(touch) < 3:
+        raise ValueError("TABLE_TOUCH_Z needs at least 3 tags (a plane), or leave it empty to use TABLE_Z")
+    A = np.array([[*config.TABLE_TAGS[i], 1.0] for i in touch])
+    z = np.array([touch[i] - config.FINGERTIP_CLOSED_M for i in touch])
+    a, b, c = np.linalg.lstsq(A, z, rcond=None)[0]
+    return float(a * x + b * y + c)
+
+
+def fingertip_z(p_flange, R):
+    """Height of the closed fingertips (the gripper's lowest point when pointing down) for a flange pose."""
+    return float(p_flange[2] + R[2, 2] * config.FINGERTIP_CLOSED_M)
+
+
+def table_clearance(p_flange, R):
+    """How far (m) the closed fingertips are above the table at this flange pose; negative = inside it."""
+    tip = np.asarray(p_flange, float) + R[:, 2] * config.FINGERTIP_CLOSED_M
+    return fingertip_z(p_flange, R) - table_z(tip[0], tip[1])
+
+
 def in_workspace(p):
     return all(lo <= v <= hi for v, (lo, hi) in zip(p, (config.WORKSPACE[k] for k in "xyz")))
 

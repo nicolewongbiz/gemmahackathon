@@ -50,7 +50,12 @@ TABLE_TAGS = {                     # tag36h11 id -> tag centre (x, y). MEASURE O
     3: (0.60, -0.20),
 }
 TAG_SIZE_M = 0.05
-TABLE_Z = 0.0                      # table surface height in the base frame
+TABLE_Z = 0.0                      # table surface height in the base frame (used only while TABLE_TOUCH_Z is empty)
+# How the table height is really set (README Phase 1.6): close the gripper, point it straight down, jog until the
+# fingertips just pinch a sheet of paper on each tag, and read the flange z (tf2_echo base_link end_effector_link).
+# A plane through these 4 heights replaces TABLE_Z: it follows a tilted table, and since the same arm measured it,
+# ruler error in FINGERTIP_CLOSED_M and the arm's own z offset cancel out of the grasp height.
+TABLE_TOUCH_Z = {}                 # tag id -> flange z (m) with the closed fingertips touching the mat there
 SHAFT_MIN_VAL = 140                # shaft = bright (HSV V) and unsaturated; a lit dark mat stays below this
 TOOL_MIN_AREA_PX = 800             # smaller blobs are noise
 SHAFT_MAX_SAT = 70                 # shaft = low saturation (metal); handle = its TOOLS colour
@@ -65,22 +70,36 @@ GRASP_FROM_FERRULE_M = 0.02        # grasp the shaft this far from where the han
 PLANNING_GROUP = "manipulator"
 BASE_FRAME = "base_link"
 EE_LINK = "end_effector_link"      # tip of the manipulator group = the flange
-# Flange -> the point between the pads that goes on the shaft axis, along tool z. The 2F-85 fingertips move ~13 mm
-# further out as they close on a thin shaft, so: TCP_OFFSET_M = closed fingertip distance + 0.004 - TOOL_RADIUS_M.
-# Sim (Menagerie 2F-85): 0.173 + 0.004 - 0.012 = 0.165. MEASURE the real one (README Phase 1.6).
-TCP_OFFSET_M = 0.165
+# ---- Never hit the table ----
+# The 2F-85 fingertips move ~13 mm further out as they close, so the lowest the gripper ever gets is its closed
+# fingertips. Every pick puts them TABLE_CLEARANCE_M above the table, and handover.plan_targets refuses any target
+# that would go lower. Sim: the lowest gripper point at the grasp is 0.7 mm below this (pad shape), and picks work
+# the same from 4 to 10 mm. Above ~6 mm the pads close on the shaft with only their bottom edge.
+FINGERTIP_CLOSED_M = 0.173         # flange -> closed fingertips (Menagerie 2F-85; ruler on the real one, Phase 1.6)
+TABLE_CLEARANCE_M = 0.006          # closed fingertips above the table at the bottom of every pick
+# Flange -> the point between the pads that goes on the shaft axis, along tool z (0.167)
+TCP_OFFSET_M = FINGERTIP_CLOSED_M + TABLE_CLEARANCE_M - TOOL_RADIUS_M
+AIR_GAP_M = 0.0                    # first runs on the real arm: 0.03 = every pick closes 3 cm above the tools
+DESCEND_SLOW_M = 0.03              # the last 3 cm down to a grasp run at DESCEND_SLOW_SCALE
+DESCEND_SLOW_SCALE = 0.05          # (a wrong table height then touches gently, with time to hit the E-stop)
 FINGERS_ALONG = "x"                # flange axis the 2F-85 fingers close along (check in RViz, Phase 1.6)
 HOVER_M = 0.12                     # approach / lift height above the grasp
 VEL_SCALE, ACC_SCALE = 0.2, 0.2
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.8
 GRIPPER_MAX_EFFORT = 50.0
+# Missed grasp = after the lift the fingers closed past this (nothing between them). Sim: 0.745 on a 6 mm shaft,
+# 0.782 on nothing. MEASURE (Phase 1.6): close on nothing and on the thinnest shaft, set this between the two.
+GRIPPER_JOINT = "robotiq_85_left_knuckle_joint"    # in /joint_states (VERIFY the name on the real driver)
+GRIPPER_EMPTY_POS = 0.765
+PICK_ATTEMPTS = 3                  # a miss -> back to the look pose, look again, pick again
 HANDOVER_XYZ = (0.45, 0.30, 0.35)  # where the tool is presented (operator's chest height, not face)
 OPERATOR_DIR = (0.0, 1.0, 0.0)     # unit vector, base frame: the handle points this way
 WORKSPACE = {"x": (0.15, 0.80), "y": (-0.55, 0.55), "z": (0.0, 0.70)}
 # MoveIt only avoids what is in its planning scene. handover_node adds the table and a keep-out box this tall over
 # the tag rectangle (the tools), so free moves never sweep the tray; only the vertical descend/lift enter it.
 TRAY_KEEPOUT_H = 0.06
+BASE_HOLE_M = 0.08                 # the scene table leaves this much (half-width) around the base free (sim base radius 0.046)
 
 # ---- Release: tug detection on joint torques (/joint_states effort, N*m) ----
 TUG_JOINTS = ["joint_5", "joint_6", "joint_7"]   # wrist joints feel a pull on the tool most
