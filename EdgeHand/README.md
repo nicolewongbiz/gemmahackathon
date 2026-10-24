@@ -244,7 +244,10 @@ EdgeHand/
 | All nodes vs fake MoveIt, vision from a camera topic: text → Gemma → look → locate → Gemma names → MoveIt → tug → release; STOP mid-move; Pi REQUEST + RELEASE over UDP; a tool that isn't there | `bash test/run_integration.sh` | 4/4 |
 | Pi watchdog | heartbeats stop | `/edgehand/stop` within 0.45 s, none while beating |
 | MuJoCo, wrist camera at the look pose, random tool poses: vision → pick → present → 12 N tug | from `EdgeHand/`: `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20` (needs the sim venv and models from `GemmaHackathon/README.md` §10) | 20/20, vision ≤ 4.2 mm, handle towards the operator every time, release 0.1 s after the pull, no table contact |
+| MuJoCo multi-tool trays, real Gemma 4 E4B for intent and naming: 4 tools per tray from 6 classes (adds sim-only pliers, wrench, hammer) | from `EdgeHand/`: `-m sim.tools` | Wrist camera + Gemma naming: **29/30 end to end (97%)**, tools found and named 120/120, grasp + handover 22/22, 0 collisions. Before, with the overhead camera and colour naming: 56/60 (93%). Phrase battery 55/59 (93%) |
 | Real arm, read-only (no motion) | Kortex probe | see "Measured on the real arm" above |
+
+In the multi-tool sim the remaining misses are all in intent, for the sim-only pliers ("pass me the grips", "the side cutters", "I need to bend this wire" → null) plus "pry open this paint can lid" for the flathead. A worked example in the intent prompt would probably fix them. The sim tools are coloured shapes under even lighting, so naming real tools on a real camera will be harder than 120/120.
 
 **Not tested yet:** frames from the real RealSense (not plugged in when this was written), Gemma naming on real tools and lighting, `moveit_client.py` against a real `move_group` (only against `fake_cell.py`), and the ros2_kortex controllers. Running LiteRT on the GPU at the same time as other GPU work (a second Gemma process, MuJoCo rendering) made calls fail or time out on the Mac, so run one Gemma-heavy job at a time.
 
