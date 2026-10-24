@@ -18,12 +18,14 @@ def test_kortex_theta_inverts_kortex_R(theta):
 
 
 def test_free_move_rises_translates_then_descends():
-    p0, p1 = (0.40, 0.00, 0.30), (0.55, 0.20, 0.20)
+    from edgehand.kortex_robot import travel_floor_z
+    top = travel_floor_z() + 0.1                                            # both ends above the travel floor
+    p0, p1 = (0.40, 0.00, top), (0.55, 0.20, top - 0.10)
     wps = free_waypoints(p0, p1, np.eye(3))
-    assert len(wps) == 2 and np.allclose(wps[0][0], (0.55, 0.20, 0.30)) and np.allclose(wps[1][0], p1)
+    assert len(wps) == 2 and np.allclose(wps[0][0], (0.55, 0.20, top)) and np.allclose(wps[1][0], p1)
     wps = free_waypoints(p1, p0, np.eye(3))                                 # going up: rise first
-    assert len(wps) == 2 and np.allclose(wps[0][0], (0.55, 0.20, 0.30)) and np.allclose(wps[1][0], p0)
-    assert len(free_waypoints((0.4, 0, 0.3), (0.4, 0, 0.3), np.eye(3))) == 1   # no-op move still returns a target
+    assert len(wps) == 2 and np.allclose(wps[0][0], (0.55, 0.20, top)) and np.allclose(wps[1][0], p0)
+    assert len(free_waypoints((0.4, 0, top), (0.4, 0, top), np.eye(3))) == 1   # no-op move still returns a target
 
 
 def test_free_move_never_translates_below_the_travel_floor():
@@ -32,9 +34,13 @@ def test_free_move_never_translates_below_the_travel_floor():
     R = kortex_R(180, 0, 90)
     p0, p1 = (0.30, -0.10, 0.30), (0.40, 0.05, 0.30)
     wps = free_waypoints(p0, p1, R, R)
-    lateral = [p for p, _ in wps if abs(p[0] - p0[0]) > 1e-6 or abs(p[1] - p0[1]) > 1e-6]
-    assert lateral and all(p[2] >= travel_floor_z() - 1e-9 for p in lateral)
-    assert table_clearance(lateral[0], R) >= config.TRAVEL_MIN_FINGERTIP_M - 1e-9
+    prev, lateral = np.asarray(p0), []
+    for p, _ in wps:                                                        # legs that change x or y
+        if np.linalg.norm(p[:2] - prev[:2]) > 1e-6:
+            lateral.append((prev, p))
+        prev = p
+    assert lateral and all(min(a[2], b[2]) >= travel_floor_z() - 1e-9 for a, b in lateral)
+    assert table_clearance(lateral[0][1], R) >= config.TRAVEL_MIN_FINGERTIP_M - 1e-9
 
 
 def test_free_move_turns_only_at_height():

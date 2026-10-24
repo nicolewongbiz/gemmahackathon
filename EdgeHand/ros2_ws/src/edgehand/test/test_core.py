@@ -364,8 +364,10 @@ def test_handover_motion_failure():
 def test_pick_yaw_takes_the_smaller_turn_and_flips_the_handover():
     from edgehand.geometry import kortex_R, yaw_of
     h = Handover(FakeRobot(), log=lambda *a: None)
-    d = (np.cos(np.radians(-40.8)), np.sin(np.radians(-40.8)))          # the cell: handle at -40.8 deg
-    now = kortex_R(180, 0, 99)                                          # look pose: yaw 99 -> 140 deg turn
+    # the cell's case: from the look pose (yaw 99) the plain grasp would need a 140 deg wrist turn; the flange x axis
+    # of tool_down_R(d) points 90 deg past the handle direction, so a handle at 149 deg puts it at -121
+    d = (np.cos(np.radians(149)), np.sin(np.radians(149)))
+    now = kortex_R(180, 0, 99)
     t = h.plan_targets((0.30, -0.05), d, current_R=now)
     turn = abs((np.degrees(yaw_of(t["grasp"][1])) - 99 + 180) % 360 - 180)
     assert turn < 90                                                     # flipped grasp: ~40 deg instead of ~140
