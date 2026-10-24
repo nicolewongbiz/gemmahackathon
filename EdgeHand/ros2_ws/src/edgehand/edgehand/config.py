@@ -86,8 +86,13 @@ MIN_SHAFT_BEYOND_GRASP_M = 0.015   # shaft needed past the grasp point so the fi
 # Who names each found tool: "gemma" (numbered marks + TOOL_DESCRIPTIONS) or "colour" (TOOLS HSV ranges)
 VISION_NAMER = "gemma"
 VISION_GEMMA_MODEL = os.environ.get("EDGEHAND_VISION_MODEL", GEMMA_MODEL)   # E4B .litertlm (vision encoder)
-TOOL_RADIUS_M = 0.012              # grasp height above the table (shaft lies on the handle's radius)
-GRASP_FROM_FERRULE_M = 0.02        # grasp the shaft this far from where the handle ends
+# Where on the tool the fingers close. Precision screwdrivers (the real tray): the shaft is 3-4 mm thick, so lying
+# flat its top is below the fingertips' clearance and the pads close above it (seen on the cell: brushed the top).
+# "handle": GRASP_FROM_FERRULE_M into the handle from the ferrule; the operator gets the handle's free end.
+# "shaft": the original rule, GRASP_FROM_FERRULE_M down the shaft, for fat-shafted tools (sim, synthetic tests).
+GRASP_SIDE = "handle"
+TOOL_RADIUS_M = 0.005              # grasp height above the table: radius of the part gripped (precision handle ~10 mm)
+GRASP_FROM_FERRULE_M = 0.02        # grasp this far from where the handle ends (on the GRASP_SIDE)
 
 # ---- Motion (MoveIt 2 via ros2_kortex) ----
 PLANNING_GROUP = "manipulator"
@@ -99,7 +104,7 @@ EE_LINK = "end_effector_link"      # tip of the manipulator group = the flange
 # that would go lower. Sim: the lowest gripper point at the grasp is 0.7 mm below this (pad shape), and picks work
 # the same from 4 to 10 mm. Above ~6 mm the pads close on the shaft with only their bottom edge.
 FINGERTIP_CLOSED_M = 0.173         # flange -> closed fingertips (Menagerie 2F-85; ruler on the real one, Phase 1.6)
-TABLE_CLEARANCE_M = 0.006          # closed fingertips above the table at the bottom of every pick
+TABLE_CLEARANCE_M = 0.004          # closed fingertips above the table at the bottom of every pick (plane from touches)
 # Flange -> the point between the pads that goes on the shaft axis, along tool z (0.167)
 TCP_OFFSET_M = FINGERTIP_CLOSED_M + TABLE_CLEARANCE_M - TOOL_RADIUS_M
 AIR_GAP_M = 0.0                    # first runs on the real arm: 0.03 = every pick closes 3 cm above the tools

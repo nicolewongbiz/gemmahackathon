@@ -280,15 +280,16 @@ Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
 | `LOOK_SETTLE_S`, `LOCATE_SKIP_FRAMES` | 0.5, 5 | wait at the look pose; frames dropped after a locate request |
 | `TABLE_TAGS` | measured | tag centres (m, base frame) |
 | `TABLE_TOUCH_Z` | {} (measure) | flange z with the closed fingertips touching each tag (Phase 1.6); a plane through them is the table. Empty = flat at `TABLE_Z` |
-| `TABLE_CLEARANCE_M` | 0.006 | closed fingertips above the table at the bottom of every pick; lower targets are refused (§2.3.1) |
+| `TABLE_CLEARANCE_M` | 0.004 | closed fingertips above the table at the bottom of every pick; lower targets are refused (§2.3.1). 4 mm relies on `TABLE_TOUCH_Z` measured with the fingertips (the cell's 4 touches agreed within 2.5 mm) |
 | `FINGERTIP_CLOSED_M` | 0.173 | flange → closed fingertips (Phase 1.6) |
 | `AIR_GAP_M` | 0.0 | 0.03 for the first real runs: every grasp 3 cm above the tools, no grasp check |
 | `DESCEND_SLOW_M`, `DESCEND_SLOW_SCALE` | 0.03, 0.05 | the last 3 cm of each descent at 5% speed |
 | `GRIPPER_JOINT`, `GRIPPER_EMPTY_POS` | robotiq_85_left_knuckle_joint, 0.765 | finger position past this after the lift = missed grasp (Phase 1.6) |
 | `PICK_ATTEMPTS` | 3 | picks per request; after a miss the arm looks again |
 | `BASE_HOLE_M` | 0.08 | half-width of the hole in the planning-scene table around the base |
-| `TOOL_RADIUS_M` | 0.012 | z of the grasp above the table (shaft/handle radius) |
-| `GRASP_FROM_FERRULE_M` | 0.02 | grasp point on the shaft, measured from the handle |
+| `GRASP_SIDE` | "handle" | where the fingers close: "handle" = 2 cm into the handle from the ferrule (precision screwdrivers: the 3–4 mm shaft lies below the fingertips' clearance; the operator gets the handle's free end), "shaft" = 2 cm down the shaft (fat-shafted tools; the sim and the synthetic tests) |
+| `TOOL_RADIUS_M` | 0.005 | z of the grasp above the table: radius of the part gripped |
+| `GRASP_FROM_FERRULE_M` | 0.02 | grasp point, measured from where the handle ends, on `GRASP_SIDE` |
 | `TCP_OFFSET_M` | 0.167 (derived) | flange → grasp point along tool z = `FINGERTIP_CLOSED_M + TABLE_CLEARANCE_M − TOOL_RADIUS_M` |
 | `FINGERS_ALONG` | "x" | flange axis the fingers close along (Phase 1.6) |
 | `TRAY_KEEPOUT_H` | 0.06 | height of the planning-scene box over the tool tray |

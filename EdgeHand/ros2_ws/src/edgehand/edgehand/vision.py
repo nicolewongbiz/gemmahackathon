@@ -200,7 +200,7 @@ def find_tools_colour(frame, tmap):
         ferrule, handle = tmap.px_to_table(*ferrule_px), tmap.px_to_table(*centre)
         d = handle - ferrule
         d /= np.linalg.norm(d)
-        grasp = ferrule - d * config.GRASP_FROM_FERRULE_M
+        grasp = grasp_point(ferrule, d)
         if not on_tray(grasp):
             continue                                              # desk clutter beyond the tags (cables, etc.)
         out.append({"grasp_xy": grasp, "handle_dir": d, "grasp_px": tmap.table_to_px(*grasp), "handle_px": centre,
@@ -318,7 +318,7 @@ def find_tools_contrast(frame, tmap):
         ferrule, handle = to_table(ferrule_uv), to_table(handle_uv)
         d = handle - ferrule
         d /= np.linalg.norm(d)
-        grasp = ferrule - d * config.GRASP_FROM_FERRULE_M
+        grasp = grasp_point(ferrule, d)
         if not on_tray(grasp):
             continue
         # the outline back in camera pixels, for colour_class, the namer's marks and draw()
@@ -328,6 +328,13 @@ def find_tools_contrast(frame, tmap):
                     "colour": colour_class(hsv, cam), "width_m": handle_w / k, "length_m": length / k,
                     "shaft_w_m": shaft_w / k})
     return sorted(out, key=lambda t: -t["area"])
+
+
+def grasp_point(ferrule, handle_dir):
+    """Where the fingers close: GRASP_FROM_FERRULE_M from the ferrule, down the shaft or into the handle
+    (config.GRASP_SIDE). handle_dir points from the ferrule towards the handle."""
+    sign = 1.0 if config.GRASP_SIDE == "handle" else -1.0
+    return np.asarray(ferrule, float) + sign * np.asarray(handle_dir, float) * config.GRASP_FROM_FERRULE_M
 
 
 def on_tray(xy):

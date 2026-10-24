@@ -70,3 +70,13 @@ def test_contrast_also_works_on_the_dark_mat_with_coloured_handles():
     img = synthetic.frame([("phillips", (0.45, 0.05), (0, 1)), ("torx", (0.50, -0.05), (1, 0))])
     tools = find_tools_contrast(img, tm_for(img))
     assert sorted(t["colour"] for t in tools) == ["phillips", "torx"]
+
+
+def test_handle_side_grasp_is_two_cm_into_the_handle(monkeypatch):
+    monkeypatch.setattr(config, "GRASP_SIDE", "handle")
+    g, d = (0.45, 0.05), np.array([0.0, 1.0])                            # label: shaft grasp 2 cm below the ferrule
+    img = synthetic.frame([("black", g, d)], mat=WHITE)
+    t = find_tools_contrast(img, tm_for(img))[0]
+    ferrule = np.array(g) + d * config.GRASP_FROM_FERRULE_M
+    assert np.linalg.norm(t["grasp_xy"] - (ferrule + d * config.GRASP_FROM_FERRULE_M)) < 0.006
+    assert t["handle_dir"] @ d > 0.99                                    # still points at the handle's free end
