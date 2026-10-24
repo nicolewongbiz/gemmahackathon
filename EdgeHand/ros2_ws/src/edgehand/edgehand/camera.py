@@ -47,13 +47,31 @@ def configured_source():
     if config.CAMERA_SOURCE != "usb":
         return config.CAMERA_RTSP
     cams = usb_cameras()                             # by name: indexes shift when an iPhone etc. connects
-    for i, name in cams:
-        if config.CAMERA_USB_NAME.lower() in name.lower():
-            return i
+    hits = [(i, n) for i, n in cams if config.CAMERA_USB_NAME.lower() in n.lower()]
+    # a RealSense D4xx is two UVC devices on macOS: "... Depth" (infrared, greyscale with the projector's dots) and
+    # "... RGB". We want the colour one; a depth-only match means the RGB function didn't enumerate (re-plug).
+    colour = [(i, n) for i, n in hits if not n.strip().lower().endswith("depth")]
+    if colour:
+        return colour[0][0]
+    if hits:
+        # macOS often lists just the "Depth" device. What it streams depends on the USB path: on the dock's USB 2
+        # port it gave colour; on a USB 3 port it gives IR (is_infrared below tells them apart on the first frame).
+        return hits[0][0]
     if cams:                                         # we can see the cameras and the right one isn't there: say so
         raise RuntimeError(f"no camera named like {config.CAMERA_USB_NAME!r}; connected: "
                            + ", ".join(f"{i}: {n}" for i, n in cams) + ". Plug the RealSense into this computer.")
     return config.CAMERA_USB_INDEX                   # can't list names (no AVFoundation binding): the configured index
+
+
+def is_infrared(frame):
+    """True for the D435's IR stream: a greyscale image (all channels equal), unlike any colour scene."""
+    import numpy as np
+    f = frame[::8, ::8].astype(int)
+    return bool(np.abs(f[:, :, 0] - f[:, :, 2]).mean() < 1.0)
+
+
+IR_HINT = ("the RealSense is streaming INFRARED (greyscale with the projector's dot pattern), not colour. On this Mac "
+           "the colour stream came through the dock's USB 2 port; a direct USB 3 port gives IR. Move the camera.")
 
 
 class StreamCamera:

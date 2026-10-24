@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from edgehand import config
-from edgehand.camera import StreamCamera
+from edgehand.camera import IR_HINT, StreamCamera, is_infrared
 from edgehand.geometry import table_z
 from edgehand.handover import Handover
 from edgehand.vision import TableMap, detect_tools, draw, find_tools
@@ -64,6 +64,9 @@ class Eyes:
     def see(self, show):
         """[(tool dict with 'tool' name)], or None when not calibrated."""
         f = self.frame()
+        if f is not None and is_infrared(f):
+            print("CAMERA:", IR_HINT)
+            return None
         if f is None or not self.tm.update(f):
             print("NOT CALIBRATED:", getattr(self.tm, "why_not", lambda: "tags not found")())
             return None
