@@ -24,6 +24,22 @@ def kortex_theta(R):
     return tuple(float(np.degrees(v)) for v in (tx, ty, tz))
 
 
+# Gen3 7-DoF joint position limits (deg) for the limited joints; 1, 3, 5, 7 are continuous. From a joint at its
+# limit (the Retract pose puts joint 4 at -147.8) the Cartesian planner refuses any reach_pose with INVALID_PARAM.
+JOINT_LIMITS_DEG = {2: 128.9, 4: 147.8, 6: 120.3}
+NEAR_LIMIT_DEG = 3.0
+
+
+def near_joint_limit(joints_deg):
+    """[(joint number, angle)] of limited joints within NEAR_LIMIT_DEG of a limit. joints_deg: 7 angles, any wrap."""
+    out = []
+    for j, lim in JOINT_LIMITS_DEG.items():
+        a = (float(joints_deg[j - 1]) + 180.0) % 360.0 - 180.0
+        if abs(a) >= lim - NEAR_LIMIT_DEG:
+            out.append((j, round(a, 1)))
+    return out
+
+
 def too_low(p, R):
     """A reason string if this flange pose puts the closed fingertips under the clearance, else None."""
     c = table_clearance(p, R)
@@ -112,9 +128,14 @@ class KortexRobot:
         s = a.reach_pose.constraint.speed
         s.translation = float(min(speed_mps, 0.1))
         s.orientation = float(config.KORTEX_ANGULAR_SPEED_DPS)
-        done, result = threading.Event(), {}
         self.log(f"kortex: reach tool ({t.x:.3f}, {t.y:.3f}, {t.z:.3f}) theta ({t.theta_x:.1f}, {t.theta_y:.1f}, "
                  f"{t.theta_z:.1f}) at {s.translation:.3f} m/s")
+        return self._execute(a)
+
+    def _execute(self, a):
+        """Run a Kortex action and wait for its end. True when it ended normally."""
+        B = self.B
+        done, result = threading.Event(), {}
 
         def cb(n):
             if n.action_event in (B.ACTION_END, B.ACTION_ABORT):
@@ -159,6 +180,31 @@ class KortexRobot:
 
     def _feedback(self):
         return self.cyclic.RefreshFeedback()
+
+    def joints(self):
+        """Measured joint angles (deg), joint 1 first."""
+        return [j.value for j in self.base.GetMeasuredJointAngles().joint_angles]
+
+    def home(self):
+        """Kinova's stored 'Home' preset: a joint-space move that unfolds the arm forward and up (tool ~0.58, 0,
+        0.43), the way out of a folded pose like Retract, from which Cartesian moves are refused."""
+        B = self.B
+        req = B.RequestedActionType()
+        req.action_type = B.REACH_JOINT_ANGLES
+        for a in self.base.ReadAllActions(req).action_list:
+            if a.name == "Home":
+                self.log("kortex: Home (joint move) first")
+                return self._execute(a)
+        self.log("kortex: no stored 'Home' action on this arm")
+        return False
+
+    def unfold_if_needed(self):
+        """True if the arm is free to take Cartesian moves (after a Home if a limited joint sat at its limit)."""
+        at = near_joint_limit(self.joints())
+        if not at:
+            return True
+        self.log(f"kortex: joint(s) at a limit {at} (folded, e.g. Retract): Cartesian moves would be refused")
+        return self.home()
 
     def flange(self):
         """Measured flange position and R."""
@@ -212,7 +258,7 @@ class KortexRobot:
         return {f"joint_{i + 1}": float(a.torque) for i, a in enumerate(fb.actuators)}
 
     def look(self):
-        return self.move_free(*look_pose())
+        return self.unfold_if_needed() and self.move_free(*look_pose())
 
     def wait(self, seconds):
         time.sleep(seconds)

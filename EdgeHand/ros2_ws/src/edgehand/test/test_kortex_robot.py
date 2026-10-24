@@ -39,6 +39,14 @@ def test_free_move_turns_only_at_height():
         assert table_clearance(p, R) > 0.2
 
 
+def test_near_joint_limit_spots_the_folded_arm():
+    from edgehand.kortex_robot import near_joint_limit
+    lab = [208.0, 295.4, 323.3, 212.2, 14.3, 111.1, 140.3]          # measured in Retract: joint 4 = -147.8
+    assert near_joint_limit(lab) == [(4, -147.8)]
+    assert near_joint_limit([0, 0, 0, 0, 0, 0, 0]) == []
+    assert near_joint_limit([0, 127.0, 0, 0, 0, -119.0, 0]) == [(2, 127.0), (6, -119.0)]
+
+
 class FakeKortex(KortexRobot):
     """KortexRobot with the SDK replaced: records reaches, moves the 'arm' instantly."""
     def __init__(self, start=(0.254, -0.043, 0.565), grip=0.7):
@@ -56,6 +64,9 @@ class FakeKortex(KortexRobot):
 
     def flange(self):
         return self.p, self.R
+
+    def joints(self):
+        return [0.0] * 7
 
     def gripper(self, pos):
         self.cmds.append(pos)
