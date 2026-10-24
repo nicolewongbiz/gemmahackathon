@@ -12,7 +12,7 @@ All poses are the FLANGE (end_effector_link); Kortex wants the TOOL frame, tool_
 import threading, time
 import numpy as np
 from edgehand import config
-from edgehand.geometry import kortex_R, look_pose, table_clearance
+from edgehand.geometry import kortex_R, look_pose, table_clearance, table_z
 
 
 def kortex_theta(R):
@@ -56,13 +56,21 @@ def already_there(p0, R0, p1, R1, pos_tol=0.003, ang_tol_deg=1.0):
     return np.degrees(np.arccos(np.clip(cos, -1, 1))) < ang_tol_deg
 
 
+def travel_floor_z():
+    """The lowest flange height for any sideways leg: closed fingertips TRAVEL_MIN_FINGERTIP_M above the table."""
+    xs, ys = zip(*config.TABLE_TAGS.values())
+    highest = max(table_z(x, y) for x in (min(xs), max(xs)) for y in (min(ys), max(ys)))
+    return highest + config.TRAVEL_MIN_FINGERTIP_M + config.FINGERTIP_CLOSED_M
+
+
 def free_waypoints(p0, p1, R1, R0=None, lift=0.0):
-    """Flange (position, R) waypoints for a free move p0 -> p1: rise to max(z0, z1) + lift keeping the current
-    orientation R0, turn to R1 up there, translate, descend. So the gripper never swings its fingertips down near the
-    table and never moves sideways low. Legs that change nothing are dropped."""
+    """Flange (position, R) waypoints for a free move p0 -> p1: rise to max(z0, z1, travel floor) + lift keeping
+    the current orientation R0, turn to R1 up there, translate, descend. So the gripper never swings its fingertips
+    down near the table and never moves sideways low, whatever the two endpoints. Legs that change nothing are
+    dropped."""
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
     R0 = np.asarray(R1 if R0 is None else R0, float)
-    top = max(p0[2], p1[2]) + lift
+    top = max(p0[2], p1[2], travel_floor_z()) + lift
     legs = [(np.array([p0[0], p0[1], top]), R0), (np.array([p0[0], p0[1], top]), R1),
             (np.array([p1[0], p1[1], top]), R1), (p1, R1)]
     out, last_p, last_R = [], p0, R0
@@ -133,9 +141,16 @@ class KortexRobot:
         s.orientation = float(config.KORTEX_ANGULAR_SPEED_DPS)
         self.log(f"kortex: reach tool ({t.x:.3f}, {t.y:.3f}, {t.z:.3f}) theta ({t.theta_x:.1f}, {t.theta_y:.1f}, "
                  f"{t.theta_z:.1f}) at {s.translation:.3f} m/s")
-        return self._execute(a)
+        return self._execute(a, target=(tool, np.asarray(R)))
 
-    def _execute(self, a):
+    def _at(self, target):
+        """True when the measured flange pose is within 3 mm / 2 degrees of (tool position, R)."""
+        p, R = self.flange()
+        tool = p + R[:, 2] * self.tool_z
+        cos = (np.trace(R.T @ target[1]) - 1) / 2
+        return np.linalg.norm(tool - target[0]) < 0.003 and np.degrees(np.arccos(np.clip(cos, -1, 1))) < 2.0
+
+    def _execute(self, a, target=None):
         """Run a Kortex action and wait for its end. True when it ended normally.
         Kortex replays the last action notification to a new subscriber (an old ABORT, say), so only an END/ABORT
         that arrives AFTER our own action's START counts; anything before is logged and ignored."""
@@ -174,10 +189,32 @@ class KortexRobot:
                 self.log("kortex: the action never reported START; stopping")
                 self.base.Stop()
                 return False
-            if not done.wait(config.KORTEX_ACTION_TIMEOUT_S):
-                self.log("kortex: action timed out; stopping")
-                self.base.Stop()
-                return False
+            # wait for END/ABORT, but also watch the arm itself: a reach that arrives without a clean END counts
+            # as done, and a reach that stops making progress for KORTEX_STALL_S is stopped (a pure wrist turn
+            # on the cell crawled at ~2 deg/s and outlived a flat timeout).
+            t0 = last_change = time.time()
+            last_pose = None
+            while not done.wait(0.25):
+                if target is not None:
+                    try:
+                        p, R = self.flange()
+                    except Exception:
+                        continue
+                    if self._at(target):
+                        self.log("kortex: at the target (measured); not waiting for END")
+                        result["event"] = B.ACTION_END
+                        break
+                    sig = (np.round(p, 3).tolist(), np.round(kortex_theta(R), 1).tolist())
+                    if sig != last_pose:
+                        last_pose, last_change = sig, time.time()
+                    elif time.time() - last_change > config.KORTEX_STALL_S:
+                        self.log(f"kortex: no progress for {config.KORTEX_STALL_S:.0f} s; stopping")
+                        self.base.Stop()
+                        return False
+                if time.time() - t0 > config.KORTEX_ACTION_TIMEOUT_S:
+                    self.log("kortex: action timed out; stopping")
+                    self.base.Stop()
+                    return False
         finally:
             self.base.Unsubscribe(h)
         if result.get("event") != B.ACTION_END:

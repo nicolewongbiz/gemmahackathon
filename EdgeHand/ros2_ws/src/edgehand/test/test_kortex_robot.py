@@ -26,6 +26,17 @@ def test_free_move_rises_translates_then_descends():
     assert len(free_waypoints((0.4, 0, 0.3), (0.4, 0, 0.3), np.eye(3))) == 1   # no-op move still returns a target
 
 
+def test_free_move_never_translates_below_the_travel_floor():
+    from edgehand.kortex_robot import travel_floor_z
+    # both ends low (hover over one tool to hover over another): the sideways leg still climbs to the floor
+    R = kortex_R(180, 0, 90)
+    p0, p1 = (0.30, -0.10, 0.30), (0.40, 0.05, 0.30)
+    wps = free_waypoints(p0, p1, R, R)
+    lateral = [p for p, _ in wps if abs(p[0] - p0[0]) > 1e-6 or abs(p[1] - p0[1]) > 1e-6]
+    assert lateral and all(p[2] >= travel_floor_z() - 1e-9 for p in lateral)
+    assert table_clearance(lateral[0], R) >= config.TRAVEL_MIN_FINGERTIP_M - 1e-9
+
+
 def test_free_move_turns_only_at_height():
     # the arm points forward, low over the table (where the lab found it); the look pose is straight down, higher
     p0, R0 = (0.396, 0.025, 0.241), kortex_R(87.5, 12.1, 93.2)

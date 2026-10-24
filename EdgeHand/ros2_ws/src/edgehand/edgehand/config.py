@@ -125,8 +125,11 @@ VEL_SCALE, ACC_SCALE = 0.2, 0.2
 # The arm's own Cartesian controller, no collision planning: free moves rise first, translate at the higher of the
 # two heights, then descend, so lateral motion never happens low over the tray. Same clearance checks as MoveIt.
 KORTEX_LINEAR_SPEED_MPS = 0.05     # at VEL_SCALE; move_line's scale= (the slow last 3 cm) scales it down
+TRAVEL_MIN_FINGERTIP_M = 0.15      # every sideways leg of a free move keeps the closed fingertips at least this
+                                   # high above the table (tools are < 6 cm): the "safe path" floor
 KORTEX_ANGULAR_SPEED_DPS = 15.0
-KORTEX_ACTION_TIMEOUT_S = 40.0
+KORTEX_ACTION_TIMEOUT_S = 120.0    # a reach is also finished when the measured pose matches, and
+KORTEX_STALL_S = 6.0               # stopped when the pose hasn't changed for this long (crawling / stuck)
 KORTEX_READY_WAIT_S = 1.0          # after a refused action: how long to wait for a settled state before logging it
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.8

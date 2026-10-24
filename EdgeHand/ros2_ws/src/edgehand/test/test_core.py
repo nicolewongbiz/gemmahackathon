@@ -358,3 +358,21 @@ def test_handover_refuses_outside_workspace():
 def test_handover_motion_failure():
     ok, msg = Handover(FakeRobot(fail="line"), log=lambda *a: None).run((0.45, 0.0), (0, 1))
     assert not ok and "descend failed" in msg
+
+
+# ---- the smaller wrist turn ----
+def test_pick_yaw_takes_the_smaller_turn_and_flips_the_handover():
+    from edgehand.geometry import kortex_R, yaw_of
+    h = Handover(FakeRobot(), log=lambda *a: None)
+    d = (np.cos(np.radians(-40.8)), np.sin(np.radians(-40.8)))          # the cell: handle at -40.8 deg
+    now = kortex_R(180, 0, 99)                                          # look pose: yaw 99 -> 140 deg turn
+    t = h.plan_targets((0.30, -0.05), d, current_R=now)
+    turn = abs((np.degrees(yaw_of(t["grasp"][1])) - 99 + 180) % 360 - 180)
+    assert turn < 90                                                     # flipped grasp: ~40 deg instead of ~140
+    # the handover orientation is flipped the same way: the flange axis along the tool points AWAY from the operator
+    along = t["give"][1][:, 1] if config.FINGERS_ALONG == "x" else t["give"][1][:, 0]
+    assert along[:2] @ np.array(config.OPERATOR_DIR[:2]) < -0.99
+    # without the current orientation, nothing changes
+    t0 = h.plan_targets((0.30, -0.05), d)
+    along0 = t0["give"][1][:, 1] if config.FINGERS_ALONG == "x" else t0["give"][1][:, 0]
+    assert along0[:2] @ np.array(config.OPERATOR_DIR[:2]) > 0.99

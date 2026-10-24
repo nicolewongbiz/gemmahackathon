@@ -15,7 +15,7 @@ A Robot provides (all poses are the FLANGE, EE_LINK, as position + 3x3 rotation 
 import threading
 import numpy as np
 from edgehand import config
-from edgehand.geometry import flange_from_tcp, handover_R, in_workspace, table_clearance, table_z, tool_down_R
+from edgehand.geometry import flange_from_tcp, handover_R, in_workspace, table_clearance, table_z, tool_down_R, yaw_of
 from edgehand.release import TugDetector
 
 
@@ -46,11 +46,19 @@ class Handover:
         if not ok:
             raise RuntimeError(f"{name} failed")
 
-    def plan_targets(self, grasp_xy, handle_dir):
+    def plan_targets(self, grasp_xy, handle_dir, current_R=None):
         """Flange poses for every waypoint. Raises ValueError if any is outside WORKSPACE, or would bring the closed
-        fingertips closer to the table than TABLE_CLEARANCE_M."""
+        fingertips closer to the table than TABLE_CLEARANCE_M. The fingers close across the tool, so the grasp is
+        the same turned by 180 degrees: given the arm's current orientation, the pick yaw needing the smaller wrist
+        turn is used, and the handover orientation is flipped to match so the handle still faces the operator."""
         z = table_z(*grasp_xy) + config.TOOL_RADIUS_M + config.AIR_GAP_M
-        R_pick, R_give = tool_down_R(handle_dir), handover_R()
+        d = np.asarray(handle_dir, float)
+        R_pick, R_give = tool_down_R(d), handover_R()
+        if current_R is not None:
+            alt = tool_down_R(-d)
+            turn = lambda R: abs((np.degrees(yaw_of(R) - yaw_of(current_R)) + 180) % 360 - 180)
+            if turn(alt) < turn(R_pick):
+                R_pick, R_give = alt, tool_down_R(-np.asarray(config.OPERATOR_DIR[:2], float))
         grasp = np.array([grasp_xy[0], grasp_xy[1], z])
         give = np.array(config.HANDOVER_XYZ, float)
         back = give - np.array([*config.OPERATOR_DIR[:2], 0.0]) * 0.10    # retreat away from the operator
@@ -76,7 +84,7 @@ class Handover:
         r = self.robot
         try:
             for attempt in range(1, config.PICK_ATTEMPTS + 1):
-                t = self.plan_targets(grasp_xy, handle_dir)
+                t = self.plan_targets(grasp_xy, handle_dir, self._current_R())
                 if self._pick(t):
                     break
                 self.log(f"missed the tool (try {attempt} of {config.PICK_ATTEMPTS})")
@@ -104,6 +112,14 @@ class Handover:
         except (RuntimeError, ValueError) as e:
             self.state("error")
             return False, str(e)
+
+    def _current_R(self):
+        """The arm's orientation now, if the robot can tell us (KortexRobot.flange); None otherwise."""
+        f = getattr(self.robot, "flange", None)
+        try:
+            return f()[1] if f else None
+        except Exception:
+            return None
 
     def _pick(self, t):
         """Open, down to the grasp (the last DESCEND_SLOW_M slowly), close, lift. False = nothing between the fingers."""
