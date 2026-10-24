@@ -84,7 +84,6 @@ scripts/test_click_pick.py  click a pixel → arm picks there
 scripts/ball_to_box.py white ball → blue box, no Gemma (runs on the arm or in sim/)
 sim/                   MuJoCo sim of the cell: Gen3 + 2F-85, tags, ball → box, and sorting with Gemma (see §10)
 tags/apriltags.pdf     print-ready AprilTags (tags/make_tags.py regenerates it)
-archive/webcam/        old USB-webcam reader, disabled (see §9)
 ```
 
 ---
@@ -140,7 +139,7 @@ Older versions (2.6, 2.7) live next to it on Kinova's Artifactory if the arm's f
 ```bash
 hf download litert-community/gemma-4-E4B-it-litert-lm gemma-4-E4B-it.litertlm --local-dir data
 ```
-If it's already on this machine, copy `../GemmaHackathonBasic/models/gemma-4-E4B-it-litert-lm/gemma-4-E4B-it.litertlm` into `data/` instead. Setting `HF_TOKEN` speeds up downloads.
+If it's already on this machine, copy the existing `gemma-4-E4B-it.litertlm` into `data/` instead. Setting `HF_TOKEN` speeds up downloads.
 
 > Use **`gemma-4-E4B-it.litertlm`**, not the `-gpu` or `-web` variants. Those have no vision encoder and fail with `Failed to create conversation` as soon as an image is sent.
 
@@ -342,7 +341,7 @@ The latest marked image Gemma saw is saved to `data/last_marked.jpg`.
 
 | Ball task says "can't see all four table tags" | A tag is at the frame edge or behind the fingers: look at `data/last_ball.jpg`, move that tag 2 cm inwards and re-measure |
 
-**Using a fixed USB webcam instead:** `archive/webcam/camera.py` holds the old OpenCV reader. Copy it to `perception/webcam.py`, make `make_camera()` return `webcam.Camera(0)`, and make `arm.look()` a no-op.
+**Using a fixed USB webcam instead:** write a small OpenCV reader (`cv2.VideoCapture(0)`) as `perception/webcam.py` with the same `read()` interface, make `make_camera()` return it, and make `arm.look()` a no-op.
 
 ---
 

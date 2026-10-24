@@ -16,7 +16,6 @@ EYES_GEMMA_BACKEND = "ollama"     # Gemma on the Jetson: "ollama" (CUDA) or "lit
 EYES_GEMMA_MODEL = "gemma4:e2b"   # Ollama tag (or a .litertlm path for litert). Verify with `ollama list`
 
 # ---- Camera: Kinova Vision module on the wrist (RTSP from the arm) ----
-# The old USB webcam backend is parked in archive/webcam/ and is not used.
 USE_MOCK_CAMERA = False           # True = grey frames, no arm needed
 VISION_CONNECT_TIMEOUT = 10.0     # s to wait for the first RTSP frame
 FRAME_W, FRAME_H = 1280, 720      # must match the stream resolution set on the arm

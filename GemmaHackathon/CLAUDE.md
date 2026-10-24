@@ -8,7 +8,7 @@ Hackathon project (Gemma Hardware Hackathon, Oct 24 2026). A Kinova Gen3 learns 
 A swarm on one switch (192.168.1.x):
 - Laptop (brain + hands): `main.py` FastAPI, Gemma 4 E4B planner, Kortex arm control. Gets scenes from the eyes through `perception/eyes.py`.
 - Jetson Orin Nano Super (eyes): `jetson/eyes_server.py` serves `LocalEyes` (camera, AprilTags, objects, teach keyframes) over HTTP, and labels objects with its own Gemma (Ollama). `EYES = "local"` runs the same `LocalEyes` on the laptop instead.
-- Camera: Kinova Vision module on the wrist, RTSP `rtsp://<ROBOT_IP>/color`. Eye-in-hand: call `arm.look()` before any perception frame. The old webcam reader is in `archive/webcam/` and is unused.
+- Camera: Kinova Vision module on the wrist, RTSP `rtsp://<ROBOT_IP>/color`. Eye-in-hand: call `arm.look()` before any perception frame.
 - Raspberry Pi 5: `pi/voice_agent.py`, Gemma 4 E2B via LiteRT-LM, audio in → intent JSON.
 
 ## Without hardware
