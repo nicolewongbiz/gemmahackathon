@@ -109,9 +109,17 @@ def footprint(t):
     return np.array([[t["xy"][0] + c * x - s * y, t["xy"][1] + s * x + c * y] for x, y in pts])
 
 
+def grasp_xy(t):
+    """Where the robot grips: GRASP_FROM_FERRULE_M along the metal from the grip (the tool body's origin)."""
+    c, s = np.cos(t["yaw"]), np.sin(t["yaw"])
+    return np.array(t["xy"]) - config.GRASP_FROM_FERRULE_M * np.array([c, s])
+
+
 def sample_tray(rng, n_tools, gap=0.06):
-    """n_tools different classes, laid flat at random, at least `gap` apart and clear of the tags."""
+    """n_tools different classes, laid flat at random, at least `gap` apart and clear of the tags. Each grasp point
+    is inside the tag rectangle, like on the real tray: vision ignores anything further out than TRAY_MARGIN_M."""
     tags = np.array(list(config.TABLE_TAGS.values()))
+    lo, hi = tags.min(axis=0), tags.max(axis=0)
     for _ in range(500):
         tools = []
         for cls in rng.choice(list(GRIPS), n_tools, replace=False):
@@ -121,6 +129,7 @@ def sample_tray(rng, n_tools, gap=0.06):
                 t["yaw"] = rng.uniform(-np.pi, np.pi)
                 fp = footprint(t)
                 if (fp[:, 0].min() > 0.24 and fp[:, 0].max() < 0.72 and np.abs(fp[:, 1]).max() < 0.34
+                        and np.all((lo < grasp_xy(t)) & (grasp_xy(t) < hi))
                         and min(np.linalg.norm(fp[:, None] - tags[None], axis=2).min(), 1) > 0.065
                         and all(np.linalg.norm(fp[:, None] - footprint(o)[None], axis=2).min() > gap for o in tools)):
                     tools.append(t)
