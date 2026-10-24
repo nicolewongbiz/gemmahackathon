@@ -179,6 +179,8 @@ PHASE_UDP_PORT = 5007
 JETSON_HOST = "192.168.55.1"
 SURGICAL_FEED_URL = f"http://{JETSON_HOST}:8090/stream.mjpg"
 ASSISTANT_GEMMA_GPU = True
+# Phase names Gemma may give as its own read of a frame (same words as the annotated timeline, so they compare)
+SURGICAL_PHASES = ["Brain exposure", "Parent vessel exposure", "Dome exposure", "Clipping"]
 ASSISTANT_IMAGE_PX = 512             # longest side of the surgical frame Gemma sees (smaller = faster)
 
 # ---- Voice (edgehand/voice_node.py, on the laptop: its mic -> Gemma -> request over the event link) ----

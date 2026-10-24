@@ -1,8 +1,10 @@
 """The surgical assistant (laptop): Gemma 4 on LiteRT-LM decides which instrument the surgeon needs next.
 
-On every phase change from the Jetson's video node (edgehand/surgical_feed.py), Gemma gets the current surgical
-frame + the phase + the instruments on the tray (config.INSTRUMENTS) in ONE call. It counts and names the instruments
-already in the scene, then picks the instrument to hand over and says why. The pick goes to run_kortex --listen as
+On every phase change from the Jetson's video node (edgehand/surgical_feed.py), two Gemma calls:
+  1. scene (image only, NOT told the phase): instruments in view, aneurysm visible?, clip applied?, and Gemma's own
+     read of the phase, so its read is independent of the annotation and the agreement shown on screen means something;
+  2. decision (text only, ~1.5 s): the scene report + the annotated phase + the tray (config.INSTRUMENTS) -> the
+     instrument to hand over and why. The pick goes to run_kortex --listen as
 {"type": "request", "tool", "source": "gemma-phase", ...}. Press v to talk: Gemma hears you with the same context and
 can request an instrument, stop or release (a spoken stop is a convenience; the red E-stop is the stop).
 
@@ -26,11 +28,21 @@ hands the surgeon instruments from a tray. Instruments on the tray (colour: inst
 {tray}
 You see the current frame from the operating microscope, and the video model tells you the surgical phase."""
 
-DECIDE = """Surgical phase now: {phase} (previous phase: {prev}).
-1. Count the surgical instruments visible in the image and name them briefly.
-2. Choose the ONE instrument from the tray the surgeon most likely needs next, given the phase and what is already
-   in use in the scene.
-Reply ONLY with JSON: {{"visible": <number>, "seen": "<short list>", "colour": "<{colours}>", "reason": "<at most 12 words>"}}"""
+SCENE_SYSTEM = """You analyse frames from an operating microscope during brain aneurysm clipping surgery."""
+
+SCENE = """Look at this frame.
+1. Count the surgical instruments visible and name them briefly.
+2. Is the aneurysm (the bulging dome on the artery) visible?
+3. Is an aneurysm clip already applied?
+4. Which phase is this most likely: {phases}?
+Reply ONLY with JSON: {{"visible": <number>, "seen": "<short list>", "aneurysm_visible": <true|false>,
+"clip_applied": <true|false>, "phase_read": "<one of the phases>"}}"""
+
+DECIDE = """The phase model says the surgical phase is: {phase} (previous phase: {prev}).
+What you saw in the current frame: {visible} instrument(s) ({seen}); aneurysm visible: {aneurysm}; clip already
+applied: {clip}; your own read of the phase: {phase_read}.
+Choose the ONE instrument from the tray the surgeon most likely needs next.
+Reply ONLY with JSON: {{"colour": "<{colours}>", "reason": "<at most 12 words>"}}"""
 
 VOICE = """Surgical phase now: {phase}. The surgeon just spoke (audio).
 Map it to ONE intent: request (an instrument, by colour, name or the job it does), stop, release (let go / got it),
@@ -61,6 +73,28 @@ def parse_decision(d):
             "seen": seen or "nothing", "reason": str(d.get("reason", ""))}
 
 
+def _bool(v):
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    return True if s in ("true", "yes", "y", "1") else False if s in ("false", "no", "n", "0") else None
+
+
+def parse_scene(d):
+    """Gemma's scene JSON -> {"visible", "seen", "aneurysm", "clip", "phase_read"} (None where it didn't say)."""
+    d = d or {}
+    try:
+        visible = int(d.get("visible"))
+    except (TypeError, ValueError):
+        visible = None
+    seen = d.get("seen", "")
+    seen = ", ".join(map(str, seen)) if isinstance(seen, list) else str(seen)
+    read = str(d.get("phase_read") or "").strip().lower()
+    read = next((p for p in config.SURGICAL_PHASES if p.lower() == read), None)
+    return {"visible": visible, "seen": seen or "nothing", "aneurysm": _bool(d.get("aneurysm_visible")),
+            "clip": _bool(d.get("clip_applied")), "phase_read": read}
+
+
 def parse_voice(d):
     d = d or {}
     intent = d.get("intent") if d.get("intent") in ("request", "stop", "release", "none") else "none"
@@ -82,6 +116,7 @@ class Assistant:
         self.phase = {"phase": None, "prev": None, "clip_t": 0.0, "annotated": True, "seq": None}
         self.decision, self.status, self.busy = None, "waiting for the video node", threading.Lock()
         self.decided_seq = None
+        self.agree, self.compared = 0, 0                    # Gemma's phase read vs the annotation
         self.dir = Path(tempfile.gettempdir()) / "edgehand_assistant"
         self.dir.mkdir(exist_ok=True)
 
@@ -108,18 +143,30 @@ class Assistant:
 
     def _decide(self, ph):
         try:
-            self.status = f"Gemma is looking at the {ph['phase']} frame..."
+            self.status = "Gemma is looking at the frame..."
             img = self._frame_path()
             t0 = time.time()
-            d = gemma.ask_json(self.engine, self.system,
-                               DECIDE.format(phase=ph["phase"], prev=ph["prev"] or "none", colours=self.colours),
-                               images=[img] if img else ())
-            r = parse_decision(d)
-            r["seconds"], r["phase"] = time.time() - t0, ph["phase"]
+            sc = parse_scene(gemma.ask_json(self.engine, SCENE_SYSTEM,
+                                            SCENE.format(phases=", ".join(config.SURGICAL_PHASES)),
+                                            images=[img] if img else ()))
+            t1 = time.time()
+            if sc["phase_read"]:
+                self.compared += 1
+                self.agree += sc["phase_read"].lower() == str(ph["phase"]).lower()
+            yn = lambda v: "unclear" if v is None else "yes" if v else "no"
+            self.status = "Gemma is choosing the instrument..."
+            r = parse_decision(gemma.ask_json(self.engine, self.system, DECIDE.format(
+                phase=ph["phase"], prev=ph["prev"] or "none", visible=sc["visible"] if sc["visible"] is not None
+                else "?", seen=sc["seen"], aneurysm=yn(sc["aneurysm"]), clip=yn(sc["clip"]),
+                phase_read=sc["phase_read"] or "unclear", colours=self.colours)))
+            r.update(visible=sc["visible"], seen=sc["seen"], scene=sc, phase=ph["phase"],
+                     seconds=time.time() - t0, scene_seconds=t1 - t0)
             self.decision = r
-            print(f"[{ph['clip_t']:5.1f} s] {ph['phase']}: Gemma sees {r['visible']} ({r['seen']}) -> "
-                  f"{r['colour']} {config.INSTRUMENTS[r['tool']][1] if r['tool'] else '-'}: {r['reason']} "
-                  f"({r['seconds']:.1f} s)", flush=True)
+            print(f"[{ph['clip_t']:5.1f} s] {ph['phase']}: Gemma sees {sc['visible']} ({sc['seen']}), aneurysm "
+                  f"{yn(sc['aneurysm'])}, clip {yn(sc['clip'])}, reads '{sc['phase_read']}' -> {r['colour']} "
+                  f"{config.INSTRUMENTS[r['tool']][1] if r['tool'] else '-'}: {r['reason']} "
+                  f"({r['scene_seconds']:.1f} + {r['seconds'] - r['scene_seconds']:.1f} s; agrees "
+                  f"{self.agree}/{self.compared})", flush=True)
             if r["tool"]:
                 self._request(r["tool"], "gemma-phase", phase=ph["phase"], reason=r["reason"])
             else:
@@ -182,17 +229,25 @@ class Assistant:
             put(role, (VW + 95, y + 28), 0.65, t=2)
             put(f"{colour} screwdriver", (VW + 95, y + 52), 0.5, (170, 170, 170))
         ph = self.phase
-        put(f"Phase: {ph['phase'] or '-'}", (20, VH + 36), 0.9, t=2)
+        put(f"Phase: {ph['phase'] or '-'}", (20, VH + 32), 0.85, t=2)
         put(f"(hand-annotated, t = {ph['clip_t']:.0f} s)" if ph.get("annotated") else "(phase model)",
-            (420, VH + 36), 0.5, (170, 170, 170))
+            (420, VH + 32), 0.5, (170, 170, 170))
         if self.decision:
             d = self.decision
-            role = config.INSTRUMENTS[d["tool"]][1] if d["tool"] else "-"
+            sc = d.get("scene") or {}
+            yn = lambda v: "?" if v is None else "yes" if v else "no"
+            read = sc.get("phase_read")
+            agrees = read is not None and read.lower() == str(d.get("phase")).lower()
+            put(f"Gemma's read: {read or '?'}" + (" (agrees)" if agrees else " (differs)" if read else "")
+                + f"   [{self.agree}/{self.compared} agree]   aneurysm visible: {yn(sc.get('aneurysm'))}"
+                f"   clip applied: {yn(sc.get('clip'))}", (20, VH + 58), 0.5,
+                (120, 255, 120) if agrees else (120, 200, 255))
             put(f"Gemma sees {d['visible'] if d['visible'] is not None else '?'} instrument(s): {d['seen']}"[:150],
-                (20, VH + 68), 0.55)
-            put(f"Gemma -> {d['colour'] or '-'} {role}", (20, VH + 100), 0.75, (120, 255, 120), 2)
-            put(d["reason"][:120], (20, VH + 126), 0.55, (120, 255, 120))
-        put(self.status[:150], (20, VH + 154), 0.5, (200, 200, 120))
+                (20, VH + 82), 0.5)
+            role = config.INSTRUMENTS[d["tool"]][1] if d["tool"] else "-"
+            put(f"Gemma -> {d['colour'] or '-'} {role}", (20, VH + 110), 0.7, (120, 255, 120), 2)
+            put(d["reason"][:120], (20, VH + 134), 0.5, (120, 255, 120))
+        put(self.status[:150], (20, VH + 160), 0.48, (200, 200, 120))
         put(f"Gemma 4 E4B on LiteRT-LM (laptop, {'GPU' if config.ASSISTANT_GEMMA_GPU else 'CPU'})   video: "
             f"{'Jetson' if jetson_alive else 'local / waiting'}   keys: v talk, r ask again, q quit",
             (20, H - 8), 0.42, (150, 150, 150))

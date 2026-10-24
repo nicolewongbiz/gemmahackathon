@@ -126,3 +126,12 @@ def test_feed_emits_phase_changes_on_time(tmp_path):
     assert [m["phase"] for m in got] == ["Exposure", "Clipping"]
     assert got[1]["prev"] == "Exposure" and 0.9 <= got[1]["clip_t"] <= 1.3 and got[1]["seq"] == 2
     assert frames and frames[0][:2] == b"\xff\xd8"                               # JPEG frames for the MJPEG stream
+
+
+def test_scene_parsing():
+    from edgehand.assistant import parse_scene
+    s = parse_scene({"visible": 2, "seen": ["forceps", "clip"], "aneurysm_visible": "yes", "clip_applied": False,
+                     "phase_read": "clipping"})
+    assert s == {"visible": 2, "seen": "forceps, clip", "aneurysm": True, "clip": False, "phase_read": "Clipping"}
+    s = parse_scene({"aneurysm_visible": "maybe", "phase_read": "suturing"})
+    assert s["aneurysm"] is None and s["phase_read"] is None and s["visible"] is None     # unknown -> None, not guessed
