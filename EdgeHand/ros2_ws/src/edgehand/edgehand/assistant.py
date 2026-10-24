@@ -119,14 +119,36 @@ class Assistant:
         self.decision, self.status, self.busy = None, "waiting for the video node", threading.Lock()
         self.decided_seq = None
         self.agree, self.compared = 0, 0                    # Gemma's phase read vs the annotation
+        # run_kortex reports {"type": "arm_state", "state": busy|holding|idle, "tool"} here; no reports = idle
+        self.arm = {"state": "idle", "tool": None}
+        self.pending = None                                 # (decision, phase) waiting for the arm to be free
         self.dir = Path(tempfile.gettempdir()) / "edgehand_assistant"
         self.dir.mkdir(exist_ok=True)
 
     def on_phase(self, msg):
+        if msg.get("type") == "arm_state":
+            self.on_arm_state(msg)
+            return
         if msg.get("type") not in ("phase", "phase_status") or msg.get("phase") is None:
             return
         self.phase.update({k: msg.get(k) for k in ("phase", "prev", "clip_t", "annotated", "seq")})
         self._maybe_decide()
+
+    def on_arm_state(self, msg):
+        was = self.arm["state"]
+        self.arm = {"state": msg.get("state") or "idle", "tool": msg.get("tool")}
+        if self.arm["state"] == "idle" and was != "idle" and self.pending:
+            r, ph = self.pending
+            self.pending = None
+            stale = ph["phase"] != self.phase["phase"] or r["tool"] == msg.get("tool")
+            if not stale and self.busy.acquire(blocking=False):
+                def run():
+                    try:
+                        self._confirm(r, ph)
+                    finally:
+                        self.busy.release()
+                        self._maybe_decide()
+                threading.Thread(target=run, daemon=True).start()
 
     def _maybe_decide(self):
         """Decide for the newest phase if it hasn't been decided yet and Gemma is free (else _decide picks it up)."""
@@ -169,7 +191,16 @@ class Assistant:
                   f"{config.INSTRUMENTS[r['tool']][1] if r['tool'] else '-'}: {r['reason']} "
                   f"({r['scene_seconds']:.1f} + {r['seconds'] - r['scene_seconds']:.1f} s; agrees "
                   f"{self.agree}/{self.compared})", flush=True)
-            if r["tool"] and self.confirm:
+            if r["tool"] and self.confirm and self.arm["state"] != "idle":
+                busy_with = config.INSTRUMENTS.get(self.arm["tool"], ("", "instrument", ""))
+                first = self.pending is None
+                self.pending = (r, ph)                      # newest pick replaces an older one
+                self.status = (f"arm is handing over the {busy_with[0]} {busy_with[1]}; I'll ask about the "
+                               f"{config.INSTRUMENTS[r['tool']][1]} when it's free")
+                if first:
+                    from edgehand.voice_node import speak
+                    speak(f"The arm is still handing over the {busy_with[1]}.")
+            elif r["tool"] and self.confirm:
                 self._confirm(r, ph)
             elif r["tool"]:
                 self._request(r["tool"], "gemma-phase", phase=ph["phase"], reason=r["reason"])
@@ -294,6 +325,8 @@ class Assistant:
             put(f"Gemma -> {d['colour'] or '-'} {role}", (20, VH + 110), 0.7, (120, 255, 120), 2)
             put(d["reason"][:120], (20, VH + 134), 0.5, (120, 255, 120))
         put(self.status[:150], (20, VH + 160), 0.48, (200, 200, 120))
+        put(f"arm: {self.arm['state']}" + (f" ({config.INSTRUMENTS.get(self.arm['tool'], ('', self.arm['tool'], ''))[1]})"
+            if self.arm["tool"] else ""), (W - 300, H - 8), 0.42, (150, 150, 150))
         put(f"Gemma 4 E4B on LiteRT-LM (laptop, {'GPU' if config.ASSISTANT_GEMMA_GPU else 'CPU'})   video: "
             f"{'Jetson' if jetson_alive else 'local / waiting'}   keys: v talk, r ask again, q quit",
             (20, H - 8), 0.42, (150, 150, 150))

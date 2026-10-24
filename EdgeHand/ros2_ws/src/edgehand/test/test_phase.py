@@ -157,3 +157,34 @@ def test_confirmation_keywords():
     assert rule_confirm("no, yes") == "no"                                      # a no always wins
     assert rule_confirm("I know the answer") is None                             # 'know' isn't 'no'
     assert rule_confirm("hmm let me think") is None
+
+
+def test_assistant_defers_asking_while_the_arm_is_busy():
+    import threading
+    from unittest import mock
+    from edgehand import assistant
+    with mock.patch("edgehand.gemma.make_engine", return_value=None):
+        a = assistant.Assistant(send=False)
+    asked = []
+    a._confirm = lambda r, ph: asked.append((r["tool"], ph["phase"]))
+    with mock.patch("edgehand.voice_node.speak", lambda t: None):
+        a.phase.update(phase="Clipping", seq=3)
+        a.on_phase({"type": "arm_state", "state": "busy", "tool": "clear"})
+        # a decision made while the arm is busy is kept, not asked
+        r, ph = {"tool": "torx", "reason": "x"}, {"phase": "Clipping"}
+        a.pending = (r, ph)
+        a.on_phase({"type": "arm_state", "state": "holding", "tool": "clear"})
+        assert asked == []
+        a.on_phase({"type": "arm_state", "state": "idle", "tool": "clear"})       # free: ask now
+        for _ in range(50):
+            if asked:
+                break
+            threading.Event().wait(0.02)
+        assert asked == [("torx", "Clipping")] and a.pending is None
+        # stale: the phase moved on before the arm was free -> don't ask about the old pick
+        a.pending, asked[:] = ({"tool": "phillips"}, {"phase": "Clipping"}), []
+        a.on_phase({"type": "arm_state", "state": "busy", "tool": "torx"})
+        a.phase["phase"] = "Dome exposure"
+        a.on_phase({"type": "arm_state", "state": "idle", "tool": "torx"})
+        threading.Event().wait(0.1)
+        assert asked == []
