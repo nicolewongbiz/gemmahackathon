@@ -238,6 +238,19 @@ phase/.venv/bin/python phase/predict_phases.py --repo ../neurosurgical_phase_rec
 
 **Other nodes** (`edgehand/link.py`). Small JSON events over UDP port `EVENT_UDP_PORT` (5006) to the laptop, which is the only computer that commands the arm: `request` (tool, source, phase), `release`, `stop`, and a `heartbeat` twice a second. Nodes send events, never motions. Plugging in the Jetson's USB-C gives the laptop 192.168.55.100 with no setup. A node that isn't plugged in just isn't heard, and the laptop carries on with typed requests. `run_kortex --listen` turns the listener on.
 
+### 3.3 Voice on the laptop, and setting up the Jetson
+**Voice** (`edgehand/voice_node.py`, on the laptop with its mic). Press ENTER, speak for `VOICE_SECONDS` (4 s), and Gemma 4 E4B, using its native audio input, returns `{"intent": request|stop|release|none, "tool", "heard", "reply"}`. The tool is checked against `TOOLS`, and the result goes to `run_kortex --listen` over the event link. The reply is spoken with macOS `say`, offline. The mic is picked by name (`VOICE_MIC_NAME`), because AVFoundation indexes shift when an iPhone connects. A spoken "stop" is a convenience; the red E-stop is the stop. Checked with synthesized speech: 4/4 phrases right, 1.9–3.6 s each.
+```bash
+python -m edgehand.voice_node            # ENTER, speak       --text: type instead       --list-mics
+```
+**Jetson** (Orin Nano Super, JetPack 6.2 / L4T R36.4.7, Ubuntu 22.04, user `nicole`, USB-C → 192.168.55.1). A separate venv keeps the system Python untouched. The system OpenCV is 4.5.4, which has no `ArucoDetector`.
+```bash
+python3 -m venv ~/edgehand-venv && ~/edgehand-venv/bin/pip install litert-lm-api opencv-python-headless numpy
+mkdir -p ~/edgehand-models   # copy gemma-4-E4B-it.litertlm here (3.7 GB, ~2 min over USB-C)
+# code: copy EdgeHand/ros2_ws/src/edgehand/{edgehand,test} to ~/edgehand-src (kept apart from ~/edgehand/cam_relay.py)
+```
+LiteRT-LM's aarch64 `liblitert-lm.so` loads, with CPU, GPU and NPU backends listed. Session 38's `cam_relay.py` serves the RealSense colour stream from the Jetson on :8089 (`CAMERA_SOURCE = "url"`), because macOS gives only one of the D435's two video functions (infrared or colour) per plug-in.
+
 ## 5. Settings
 
 Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
