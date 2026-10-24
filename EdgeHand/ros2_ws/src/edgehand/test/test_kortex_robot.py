@@ -71,13 +71,13 @@ class FakeBase:
 
 def _robot_with_base(base):
     r = KortexRobot.__new__(KortexRobot)
-    from kortex_api.autogen.messages import Base_pb2
+    Base_pb2 = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
     r.B, r.base, r.log, r._stopped, r.tool_z = Base_pb2, base, lambda *a: None, False, 0.12
     return r
 
 
 def test_execute_ignores_the_replayed_abort_and_waits_for_its_own_end():
-    from kortex_api.autogen.messages import Base_pb2 as B
+    B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")      # the Kortex wheel isn't everywhere
     base = FakeBase(B, stale=True)
     r = _robot_with_base(base)
     logs = []
@@ -88,7 +88,7 @@ def test_execute_ignores_the_replayed_abort_and_waits_for_its_own_end():
 
 
 def test_execute_reports_a_real_abort():
-    from kortex_api.autogen.messages import Base_pb2 as B
+    B = pytest.importorskip("kortex_api.autogen.messages.Base_pb2")
     base = FakeBase(B, stale=True, end=B.ACTION_ABORT)
     r = _robot_with_base(base)
     import time as _t
