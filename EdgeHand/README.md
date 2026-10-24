@@ -203,8 +203,22 @@ Measured in MuJoCo (§6): the lowest gripper point is 0.7 mm below the nominal c
 ### Phase 3: Dry run
 1. Mock hardware: `ros2 launch edgehand workstation.launch.py robot_ip:=0.0.0.0 use_fake_hardware:=true`. Use the RELEASE button, because there are no torques.
 2. MuJoCo, no ROS needed: from `EdgeHand/`, `../GemmaHackathon/sim/.venv/bin/python -m sim.handover --trials 20` (add `--miss` to aim the first grasp past the tool and check the retry). It runs the wrist camera at the look pose, vision, grasp, handover and tug release on a simulated Gen3, and prints the closest the gripper got to the table (§6).
-3. **Air run on the real arm:** `AIR_GAP_M = 0.03`, 20% scaling, E-stop in hand. Every pick closes 3 cm above its tool. Check the fingers end up centred over the shaft and across it, and the gripper height looks right, for tools in every corner of the tray. Then set `AIR_GAP_M = 0.0`.
-4. Real arm at 20% scaling, E-stop in hand. Tune `TUG_TORQUE_NM` with `ros2 topic echo /edgehand/state`, which prints the live Δτ.
+3. **Air run on the real arm**, E-stop in hand. Every pick closes 3 cm above its tool. Check the fingers end up centred over the shaft and across it, and the gripper height looks right, for tools in every corner of the tray.
+   - **Without ROS (fastest, from the Mac the camera is on):** `python -m edgehand.run_kortex --air --tool torx` (§3.1). Then without `--air`.
+   - With ROS: `AIR_GAP_M = 0.03` in config, the workstation launch, then `AIR_GAP_M = 0.0`.
+4. Real picks, E-stop in hand. Tune `TUG_TORQUE_NM`: `run_kortex` prints the live Δτ while holding; with ROS, `ros2 topic echo /edgehand/state`.
+
+### 3.1 Running without ROS: `run_kortex`
+`edgehand/kortex_robot.py` implements the same robot interface `handover.py` uses, on the Kortex API's Cartesian controller (`reach_pose`), and `edgehand/run_kortex.py` is the loop: look pose → camera → vision → Gemma names the tools → handover. Everything in §2.3.1 still applies: the clearance check, the table plane from fingertip touches, the slow last 3 cm, the air gap, the miss-and-retry, and the tug release (Kortex reports actuator torques). What's missing is MoveIt's collision planning, so free moves **rise first, translate at the higher of the two heights, then descend**: lateral motion never happens low over the tray. `run_kortex` refuses to pick on config.py's placeholder calibration; run `measure_tags` first.
+
+```bash
+cd EdgeHand/ros2_ws/src/edgehand && source ../../../../GemmaHackathon/.venv/bin/activate    # kortex_api, opencv, litert
+python -m edgehand.run_kortex --look-only --show        # look pose + what vision sees, no pick
+python -m edgehand.run_kortex --air --tool torx         # the whole sequence 3 cm above the tool
+python -m edgehand.run_kortex --tool torx               # one real pick
+python -m edgehand.run_kortex                           # type requests; Gemma parses them
+```
+Ctrl-C sends a Kortex Stop. The Pi buttons aren't wired into this runner.
 
 ## 5. Settings
 
@@ -265,6 +279,9 @@ EdgeHand/
     test/test_core.py          pytest for the no-ROS modules (synthetic camera frames, fake robot)
     test/fake_cell.py          fake move_group / controllers / gripper / camera for testing the real nodes
     test/run_integration.sh    all nodes (real Gemma) against fake_cell
+    edgehand/kortex_robot.py   the Robot interface on the Kortex API (no ROS): rise-translate-descend free moves
+    edgehand/run_kortex.py     no-ROS runner: camera → vision → Gemma → handover on kortex_robot (§3.1)
+    test/test_kortex_robot.py  kortex_robot with the SDK replaced: angles, move ordering, refusals, units
   sim/handover.py              MuJoCo end-to-end test: wrist camera at the look pose → vision → handover → operator tug
 ```
 

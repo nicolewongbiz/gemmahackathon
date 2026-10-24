@@ -96,6 +96,12 @@ DESCEND_SLOW_SCALE = 0.05          # (a wrong table height then touches gently, 
 FINGERS_ALONG = "x"                # flange axis the 2F-85 fingers close along (check in RViz, Phase 1.6)
 HOVER_M = 0.12                     # approach / lift height above the grasp
 VEL_SCALE, ACC_SCALE = 0.2, 0.2
+# ---- Motion without ROS: the Kortex API straight from this computer (edgehand/kortex_robot.py, run_kortex.py) ----
+# The arm's own Cartesian controller, no collision planning: free moves rise first, translate at the higher of the
+# two heights, then descend, so lateral motion never happens low over the tray. Same clearance checks as MoveIt.
+KORTEX_LINEAR_SPEED_MPS = 0.05     # at VEL_SCALE; move_line's scale= (the slow last 3 cm) scales it down
+KORTEX_ANGULAR_SPEED_DPS = 15.0
+KORTEX_ACTION_TIMEOUT_S = 40.0
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.8
 GRIPPER_MAX_EFFORT = 50.0
