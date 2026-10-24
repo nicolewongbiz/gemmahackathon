@@ -138,6 +138,12 @@ SETTLE_S = 0.8                     # wait after arriving at the handover pose be
 PI_UDP_PORT = 5005
 WATCHDOG_S = 0.5                   # no heartbeat for this long -> /edgehand/stop
 
+# ---- Event link (edgehand/link.py): Jetson / Pi / phase player -> laptop, JSON over UDP ----
+EVENT_UDP_PORT = 5006
+# Surgical phase (the phase model's label) -> the tool to fetch when that phase starts. Phases not listed fetch
+# nothing. Fill in with the model's real phase names and the stand-in tools on the tray.
+PHASE_TOOLS = {}
+
 # ---- Site calibration: data/calibration.json from `python -m edgehand.measure_tags` overrides TABLE_TAGS,
 # TABLE_TOUCH_Z, LOOK_FLANGE_XYZ, LOOK_THETA, GRIPPER_EMPTY_POS (edgehand/calibration.py). Moving the cell = re-measure.
 from edgehand.calibration import apply as _apply_calibration    # noqa: E402

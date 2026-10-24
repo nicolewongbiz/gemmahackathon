@@ -220,6 +220,15 @@ python -m edgehand.run_kortex                           # type requests; Gemma p
 ```
 Ctrl-C sends a Kortex Stop. The Pi buttons aren't wired into this runner.
 
+### 3.2 Surgical phase → instrument, and plugging in other nodes
+**Demo Channel A.** A surgical phase-recognition model runs offline on a public clip (owner-enabled download, licence allows reuse). Its predictions go in a CSV (`time_s,phase` rows, one per phase change or per second). `edgehand/phase_player.py` plays the clip from the local file with the current phase, the instrument it calls for and a phase timeline over it. Each time a phase in `PHASE_TOOLS` starts, it sends a tool request to the arm's laptop. The timeline on screen is the model's real output on that clip, replayed in sync. `--placeholder` stamps PLACEHOLDER on any timeline that isn't.
+```bash
+python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 phases.csv --headless          # list the requests it would send
+python -m edgehand.phase_player ~/Desktop/clippingdemo.mp4 phases.csv                     # play + send to the arm on this laptop
+python -m edgehand.phase_player clip.mp4 phases.csv --host 192.168.55.100 --map "Clip application=flathead"   # from the Jetson
+```
+**Other nodes** (`edgehand/link.py`). Small JSON events over UDP port `EVENT_UDP_PORT` (5006) to the laptop, which is the only computer that commands the arm: `request` (tool, source, phase), `release`, `stop`, and a `heartbeat` twice a second. Nodes send events, never motions. Plugging in the Jetson's USB-C gives the laptop 192.168.55.100 with no setup. A node that isn't plugged in just isn't heard, and the laptop carries on with typed requests. `run_kortex --listen` turns the listener on.
+
 ## 5. Settings
 
 Every tunable is in `ros2_ws/src/edgehand/edgehand/config.py`.
