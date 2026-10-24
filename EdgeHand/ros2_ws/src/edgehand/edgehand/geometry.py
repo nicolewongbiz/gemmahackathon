@@ -75,9 +75,19 @@ def table_z(x, y):
         return config.TABLE_Z
     if len(touch) < 3:
         raise ValueError("TABLE_TOUCH_Z needs at least 3 tags (a plane), or leave it empty to use TABLE_Z")
-    A = np.array([[*config.TABLE_TAGS[i], 1.0] for i in touch])
+    missing = [i for i in touch if i not in config.TABLE_TAGS]
+    if missing:
+        raise ValueError(f"TABLE_TOUCH_Z has tags {missing} that aren't in TABLE_TAGS")
     z = np.array([touch[i] - config.FINGERTIP_CLOSED_M for i in touch])
+    # a typo in one touch height would tilt the whole plane under the clearance check: a table isn't that uneven
+    if z.max() - z.min() > config.TOUCH_SPREAD_MAX_M:
+        raise ValueError(f"TABLE_TOUCH_Z heights differ by {(z.max() - z.min()) * 1000:.0f} mm "
+                         f"(max {config.TOUCH_SPREAD_MAX_M * 1000:.0f}): re-measure, one of them is wrong")
+    A = np.array([[*config.TABLE_TAGS[i], 1.0] for i in touch])
     a, b, c = np.linalg.lstsq(A, z, rcond=None)[0]
+    tilt = np.degrees(np.arctan(np.hypot(a, b)))
+    if tilt > config.TABLE_TILT_MAX_DEG:
+        raise ValueError(f"table plane tilted {tilt:.1f} degrees (max {config.TABLE_TILT_MAX_DEG}): re-measure")
     return float(a * x + b * y + c)
 
 

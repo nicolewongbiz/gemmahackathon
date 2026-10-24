@@ -5,12 +5,14 @@
 handover pose. Requests are refused while busy, or while stops are arriving (Pi watchdog).
 """
 import itertools, json, threading, time
+from pathlib import Path
 import numpy as np
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import Empty, String
 from edgehand import config
+from edgehand.geometry import table_z
 from edgehand.handover import Handover
 from edgehand.moveit_client import MoveItRobot
 
@@ -37,7 +39,28 @@ class HandoverNode(Node):
         self.create_subscription(Empty, "/edgehand/stop", self.on_stop, 10)
         self.create_subscription(Empty, "/edgehand/release", lambda _: self.handover.release(), 10)
         self.create_timer(0.5, self.publish_tug)
+        self.log_calibration()
         self.publish_state("idle")
+
+    def log_calibration(self):
+        """Which site's measurements the picks will use. Loud when it's config.py's placeholders."""
+        log = self.get_logger()
+        f = getattr(config, "CALIBRATION_FILE", None)
+        if f is None:
+            log.warn("NO SITE CALIBRATION: running on config.py defaults (placeholder TABLE_TAGS, flat table at "
+                     "TABLE_Z). Run `python -m edgehand.measure_tags` on this cell before any pick")
+        else:
+            meta = json.loads(Path(f).read_text())
+            log.info(f"site calibration {f}: site '{meta.get('site', '?')}', measured {meta.get('measured', '?')}, "
+                     f"keys {sorted(k for k in meta if k.isupper())}")
+        if not config.TABLE_TOUCH_Z:
+            log.warn(f"TABLE_TOUCH_Z is empty: table assumed flat at TABLE_Z = {config.TABLE_Z} (README Phase 1.6)")
+        else:
+            try:
+                zs = {i: round(table_z(*config.TABLE_TAGS[i]), 4) for i in config.TABLE_TOUCH_Z}
+                log.info(f"table height at the tags (m): {zs}")
+            except ValueError as e:
+                log.error(f"TABLE_TOUCH_Z rejected, every pick will be refused: {e}")
 
     def publish_state(self, s):
         self.state_pub.publish(String(data=s))
