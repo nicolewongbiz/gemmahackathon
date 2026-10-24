@@ -26,8 +26,30 @@ def open_capture(source):
     return cap
 
 
+def usb_cameras():
+    """[(OpenCV index, name)] on macOS; [] if it can't tell. OpenCV's AVFoundation backend numbers cameras sorted by
+    uniqueID (checked on the cell: RealSense 0x1400..., MacBook 6C70...), not in the order macOS lists them."""
+    if sys.platform != "darwin":
+        return []
+    try:
+        import AVFoundation as AV
+    except ImportError:
+        return []
+    types = [getattr(AV, t) for t in ("AVCaptureDeviceTypeBuiltInWideAngleCamera", "AVCaptureDeviceTypeExternal",
+                                      "AVCaptureDeviceTypeExternalUnknown", "AVCaptureDeviceTypeContinuityCamera",
+                                      "AVCaptureDeviceTypeDeskViewCamera") if hasattr(AV, t)]
+    devs = AV.AVCaptureDeviceDiscoverySession.discoverySessionWithDeviceTypes_mediaType_position_(
+        types, AV.AVMediaTypeVideo, 0).devices()
+    return [(i, str(d.localizedName())) for i, d in enumerate(sorted(devs, key=lambda d: str(d.uniqueID())))]
+
+
 def configured_source():
-    return config.CAMERA_USB_INDEX if config.CAMERA_SOURCE == "usb" else config.CAMERA_RTSP
+    if config.CAMERA_SOURCE != "usb":
+        return config.CAMERA_RTSP
+    for i, name in usb_cameras():                    # by name: indexes shift when an iPhone etc. connects
+        if config.CAMERA_USB_NAME.lower() in name.lower():
+            return i
+    return config.CAMERA_USB_INDEX
 
 
 class StreamCamera:
@@ -64,14 +86,20 @@ class StreamCamera:
 
 if __name__ == "__main__":
     if "--list" in sys.argv:
+        names = dict(usb_cameras())
         for i in range(5):
             cap = open_capture(i)
-            ok, f = cap.read() if cap.isOpened() else (False, None)
-            if ok:
+            f, t0 = None, time.time()
+            while cap.isOpened() and time.time() - t0 < 3:          # cameras take a moment to start
+                ok, fr = cap.read()
+                if ok:
+                    f = fr
+            if f is not None:
                 path = f"/tmp/edgehand_camera_{i}.jpg"
                 cv2.imwrite(path, f)
-                print(f"index {i}: {f.shape[1]}x{f.shape[0]}  snapshot {path}")
+                print(f"index {i}: {names.get(i, '?')}  {f.shape[1]}x{f.shape[0]}  snapshot {path}")
             cap.release()
+        print("configured source ->", configured_source())
         sys.exit(0)
     from edgehand.vision import TableMap, draw, find_tools
     arg = sys.argv[1] if len(sys.argv) > 1 else None

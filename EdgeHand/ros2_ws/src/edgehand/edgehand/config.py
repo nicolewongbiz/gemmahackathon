@@ -30,7 +30,8 @@ ROBOT_IP = "192.168.1.10"
 # "rtsp"  = the Kinova Vision module, streamed through the arm (this arm doesn't have one)
 # "topic" = a ROS image topic (e.g. realsense2_camera's /camera/camera/color/image_raw)
 CAMERA_SOURCE = "usb"
-CAMERA_USB_INDEX = 0               # OpenCV index; find it with: python -m edgehand.camera --list
+CAMERA_USB_NAME = "RealSense"      # pick the USB camera whose name contains this (macOS; needs pyobjc-framework-AVFoundation)
+CAMERA_USB_INDEX = 0               # fallback OpenCV index (it shifts when an iPhone etc. connects): camera --list
 CAMERA_RTSP = f"rtsp://{ROBOT_IP}/color"
 FRAME_W, FRAME_H = 1280, 720
 CAMERA_TOPIC = "/camera/camera/color/image_raw"   # for CAMERA_SOURCE = "topic"
