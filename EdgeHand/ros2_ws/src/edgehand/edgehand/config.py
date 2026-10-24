@@ -146,6 +146,11 @@ EVENT_UDP_PORT = 5006
 # nothing. Fill in with the model's real phase names and the stand-in tools on the tray.
 PHASE_TOOLS = {}
 
+# ---- Voice (edgehand/voice_node.py, on the laptop: its mic -> Gemma -> request over the event link) ----
+VOICE_MIC_NAME = "MacBook Pro Microphone"   # ffmpeg/AVFoundation input picked by name (indexes shift with an iPhone)
+VOICE_SECONDS = 4.0                # push-to-talk recording length
+VOICE_SPEAK = True                 # speak Gemma's short reply with macOS `say` (offline)
+
 # ---- Site calibration: data/calibration.json from `python -m edgehand.measure_tags` overrides TABLE_TAGS,
 # TABLE_TOUCH_Z, LOOK_FLANGE_XYZ, LOOK_THETA, GRIPPER_EMPTY_POS (edgehand/calibration.py). Moving the cell = re-measure.
 from edgehand.calibration import apply as _apply_calibration    # noqa: E402

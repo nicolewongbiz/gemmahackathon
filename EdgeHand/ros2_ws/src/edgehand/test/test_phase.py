@@ -42,3 +42,12 @@ def test_link_round_trip_with_heartbeats():
     assert got and got[0]["type"] == "request" and got[0]["tool"] == "torx"
     assert all(m["type"] != "heartbeat" for m in got)                   # heartbeats only update alive()
     assert "jetson" in listener.alive()
+
+
+def test_voice_parse_whitelists():
+    from edgehand.voice_node import parse
+    assert parse({"intent": "request", "tool": "Phillips", "heard": "x"})["tool"] == "phillips"
+    assert parse({"intent": "request", "tool": "hammer"})["intent"] == "none"      # not on the tray: no request
+    assert parse({"intent": "stop"})["intent"] == "stop"
+    assert parse({"intent": "fly"})["intent"] == "none"
+    assert parse(None)["intent"] == "none"
