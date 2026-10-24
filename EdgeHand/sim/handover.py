@@ -1,4 +1,4 @@
-"""MuJoCo end-to-end test of the EdgeHand logic, no ROS: overhead camera -> vision.py -> handover.py on a simulated
+"""MuJoCo end-to-end test of the EdgeHand logic, no ROS: wrist camera at the look pose -> vision.py -> handover.py on a simulated
 Gen3 + Robotiq 2F-85, with a simulated operator pulling the handle.
 
     ../GemmaHackathon/sim/.venv/bin/python -m sim.handover              (from EdgeHand/)
@@ -14,6 +14,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "ros2_ws" / "src" / "edgehand"))
 from edgehand import config                                    # noqa: E402
+from edgehand.geometry import look_pose                         # noqa: E402
 from edgehand.handover import Handover                          # noqa: E402
 from edgehand.vision import TableMap, detect_tools, draw        # noqa: E402
 
@@ -78,7 +79,7 @@ def build(tool_xy, tool_yaw):
                   friction=[1.0, 0.01, 0.002])
     tool.add_site(name="grasp", pos=[-config.GRASP_FROM_FERRULE_M, 0, 0])
     tool.add_site(name="handle_mid", pos=[HANDLE_L / 2, 0, 0])
-    wb.add_camera(name="overhead", pos=[0.475, 0, 1.0], fovy=45)          # fixed, looking straight down
+    wb.add_camera(name="overhead", pos=[0.475, 0, 1.0], fovy=45)          # for pictures only; vision uses "wrist"
     wb.add_camera(name="side", pos=[1.3, -0.9, 0.9], xyaxes=[0.57, 0.82, 0, -0.33, 0.23, 0.92], fovy=50)
     return spec.compile()
 
@@ -99,9 +100,10 @@ class SimRobot:
         tq = m.joint(m.body("tool").jntadr[0]).qposadr[0]
         mujoco.mj_resetDataKeyframe(m, self.d, m.key("home").id)
         self.d.qpos[tq:tq + 7] = m.qpos0[tq:tq + 7]
-        self.q_park = np.array(config.PARK_JOINTS)
-        self.d.qpos[self.qa] = self.q_park
-        self.d.ctrl[self.act] = self.q_cmd = self.q_park.copy()
+        q_look, ep, _ = self.ik(*look_pose(), self.q_home, iters=400)     # start where the arm waits
+        assert ep < 0.003, f"look pose unreachable (IK off by {ep * 1000:.0f} mm)"
+        self.d.qpos[self.qa] = q_look
+        self.d.ctrl[self.act] = self.q_cmd = q_look.copy()
         self.pull = None                 # (start time, force N) of the simulated operator's tug
         self.released_at = None
         self.handle_towards_operator = None
@@ -201,11 +203,8 @@ class SimRobot:
         self.wait(1.0)
         return True
 
-    def park(self):
-        q0 = self.q_cmd.copy()
-        n = int(max(np.abs(self.q_park - q0)) / 0.3 / (DT * CTRL_EVERY)) + 1
-        self._track(q0 + (self.q_park - q0) * i / n for i in range(1, n + 1))
-        return True
+    def look(self):
+        return self.move_free(*look_pose())
 
     def efforts(self):
         # measured joint torque ~ what the position servo pushes with (+ sensor noise)
@@ -228,13 +227,13 @@ def episode(rng, video=False, pull_delay=3.0, pull_n=12.0):
     ferrule = (rng.uniform(min(xs) + 0.08, max(xs) - 0.08), rng.uniform(min(ys) + 0.08, max(ys) - 0.08))
     m = build(ferrule, yaw)
     r = SimRobot(m, video)
-    # ---- vision on the rendered overhead frame ----
-    frame = r.render("overhead")
+    # ---- vision on the wrist camera, from the look pose (where the arm starts) ----
+    frame = r.render("wrist")
     tm = TableMap()
     if not tm.update(frame):
         return {"ok": False, "msg": "not calibrated"}
     tools = detect_tools(frame, tm)
-    cv2.imwrite(str(OUT / "overhead.jpg"), draw(frame, tm, tools))
+    cv2.imwrite(str(OUT / "wrist.jpg"), draw(frame, tm, tools))
     if not tools:
         return {"ok": False, "msg": "no tool detected"}
     t = tools[0]

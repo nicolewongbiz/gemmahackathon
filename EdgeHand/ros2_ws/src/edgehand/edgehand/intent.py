@@ -2,22 +2,23 @@
 
 Gemma only names a tool class; it never produces coordinates. Output is whitelisted against config.TOOLS.
 """
-import json, re
-from edgehand import config
+from edgehand import config, gemma
 
 SYSTEM = """You are the voice of a robot arm that hands tools to a technician.
 Tools you can hand over: {tools}.
 Map the request to ONE tool from that list, or null if they didn't ask for one of them.
 Synonyms: "cross-head", "plus" = phillips; "slotted", "flat", "straight" = flathead; "star" = torx.
+If they describe a job instead of naming a tool ("I need to pry this open"), pick the tool from the list that does
+that job. Only use null when no tool on the list fits.
 Reply ONLY with JSON: {{"tool": "<tool or null>", "reply": "<very short spoken reply>"}}"""
 
 
 def parse_reply(text):
     """First {...} in Gemma's text -> whitelisted dict. Raises ValueError if there's no JSON."""
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        raise ValueError(f"no JSON in: {text[:200]}")
-    d = json.loads(m.group(0))
+    return whitelist(gemma.first_json(text))
+
+
+def whitelist(d):
     tool = d.get("tool")
     tool = tool.strip().lower() if isinstance(tool, str) else None
     if tool not in config.TOOLS:
@@ -27,30 +28,12 @@ def parse_reply(text):
 
 class GemmaIntent:
     def __init__(self, model=config.GEMMA_MODEL):
-        import litert_lm
-        B = litert_lm.Backend
-        # newer litert-lm wants Backend instances (GPU()), older ones take the enum value
-        gpu, cpu = (b() if callable(b) else b for b in (B.GPU, B.CPU))
-        try:
-            self.engine = litert_lm.Engine(model, backend=gpu if config.GEMMA_USE_GPU else cpu)
-        except Exception:
-            self.engine = litert_lm.Engine(model, backend=cpu)
+        self.engine = gemma.make_engine(model)
         self.system = SYSTEM.format(tools=", ".join(config.TOOLS))
 
-    def _ask(self, text):
-        with self.engine.create_conversation(messages=[{"role": "system", "content": self.system}]) as conv:
-            r = conv.send_message({"role": "user", "content": [{"type": "text", "text": text}]})
-        return r["content"][0]["text"]
-
     def parse(self, text):
-        prompt, last = text, ""
-        for _ in range(config.GEMMA_RETRIES + 1):
-            last = self._ask(prompt)
-            try:
-                return parse_reply(last)
-            except (ValueError, json.JSONDecodeError):
-                prompt = text + "\nReply with ONLY a valid JSON object."
-        return {"tool": None, "reply": "Sorry, I didn't get that."}
+        d = gemma.ask_json(self.engine, self.system, text)
+        return whitelist(d) if d is not None else {"tool": None, "reply": "Sorry, I didn't get that."}
 
 
 if __name__ == "__main__":

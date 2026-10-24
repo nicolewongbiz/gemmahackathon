@@ -43,6 +43,21 @@ def tool_down_R(handle_dir_xy):
     return np.column_stack([x, y, z])
 
 
+def kortex_R(tx, ty, tz):
+    """Kortex theta_x, theta_y, theta_z (deg) -> rotation matrix. Extrinsic XYZ: R = Rz @ Ry @ Rx (checked against
+    the Gen3 Home pose, which reads (90, 0, 90) in the Web App and in the MuJoCo model)."""
+    x, y, z = np.radians([tx, ty, tz])
+    Rx = np.array([[1, 0, 0], [0, np.cos(x), -np.sin(x)], [0, np.sin(x), np.cos(x)]])
+    Ry = np.array([[np.cos(y), 0, np.sin(y)], [0, 1, 0], [-np.sin(y), 0, np.cos(y)]])
+    Rz = np.array([[np.cos(z), -np.sin(z), 0], [np.sin(z), np.cos(z), 0], [0, 0, 1]])
+    return Rz @ Ry @ Rx
+
+
+def look_pose():
+    """Flange pose for the wrist camera to see the tray: (position, R)."""
+    return np.array(config.LOOK_FLANGE_XYZ, float), kortex_R(*config.LOOK_THETA)
+
+
 def handover_R():
     """Same grip, carried to the operator: still pointing down, handle (+x) along OPERATOR_DIR."""
     return tool_down_R(config.OPERATOR_DIR[:2])

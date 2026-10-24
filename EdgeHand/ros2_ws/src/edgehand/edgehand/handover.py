@@ -5,7 +5,7 @@ A Robot provides (all poses are the FLANGE, EE_LINK, as position + 3x3 rotation 
     move_line(p, R, collisions=True) -> bool   straight-line move (MoveIt compute_cartesian_path); collisions=False
                                  lets the short vertical descend/lift enter the tray keep-out box
     gripper(pos) -> bool         0.0 open ... 0.8 closed
-    park() -> bool               joint move to PARK_JOINTS, out of the camera's view
+    look() -> bool               move to the look pose (wrist camera over the tray); also where the arm waits
     efforts() -> {joint: N*m}    latest measured joint torques
     wait(seconds)                sleep (ROS) or step physics (sim)
     cancel()                     stop the current motion now
@@ -76,7 +76,7 @@ class Handover:
             self._step("release", r.gripper(config.GRIPPER_OPEN))
             self.state("retreating")
             self._step("retreat", r.move_line(*t["retreat"]))
-            self._step("park", r.park())
+            self._step("look", r.look())
             self.state("idle")
             return True, "handed over"
         except Stopped as e:

@@ -11,7 +11,8 @@ from edgehand.geometry import R_from_quat, flange_from_tcp, handover_R, quat_fro
 from edgehand.handover import Handover                             # noqa: E402
 from edgehand.intent import parse_reply                            # noqa: E402
 from edgehand.release import TugDetector                           # noqa: E402
-from edgehand.vision import TableMap, detect_tools                 # noqa: E402
+from edgehand.vision import TableMap, detect_tools, find_tools     # noqa: E402
+from edgehand.namer import marked_image, parse_names               # noqa: E402
 import synthetic                                                   # noqa: E402
 
 
@@ -92,11 +93,45 @@ def test_detect_two_tools():
     assert sorted(t["tool"] for t in detect_tools(img, tm)) == ["flathead", "phillips"]
 
 
+def test_touching_tools_of_different_colours_stay_separate():
+    # handles side by side, touching (2.4 cm wide each, 2.4 cm apart); stacked tools aren't supported
+    img = synthetic.frame([("flathead", (0.45, 0.05), (1, 0)), ("torx", (0.45, 0.074), (1, 0))])
+    tm = TableMap()
+    tm.update(img)
+    assert sorted(t["colour"] for t in find_tools(img, tm)) == ["flathead", "torx"]
+
+
+def test_find_tools_unnamed_colour():
+    synthetic.COLOURS["mystery"] = (200, 80, 20)                         # blue handle, no TOOLS class
+    try:
+        img = synthetic.frame([("mystery", (0.45, 0.0), (0, 1))])
+    finally:
+        del synthetic.COLOURS["mystery"]
+    tm = TableMap()
+    tm.update(img)
+    found = find_tools(img, tm)
+    assert len(found) == 1 and found[0]["colour"] is None and detect_tools(img, tm) == []
+
+
+def test_parse_names_whitelists():
+    assert parse_names({"1": "Phillips", "2": "hammer", "4": "torx"}, 3) == ["phillips", None, None]
+    assert parse_names(None, 2) == [None, None]
+
+
+def test_marked_image_crops_to_the_tools():
+    img = synthetic.frame([("phillips", (0.45, 0.0), (0, 1))])
+    tm = TableMap()
+    tm.update(img)
+    out = marked_image(img, find_tools(img, tm))
+    assert 0 < out.shape[0] < img.shape[0] and 0 < out.shape[1] < img.shape[1]
+
+
 def test_not_calibrated_without_all_tags():
     tags = dict(config.TABLE_TAGS)
     tags.pop(2)
     img = synthetic.frame([("phillips", (0.45, 0.0), (0, 1))], tag_xy=tags)
-    assert not TableMap().update(img)
+    tm = TableMap()
+    assert not tm.update(img) and find_tools(img, tm) == []
 
 
 # ---- handover state machine ----
@@ -111,7 +146,7 @@ class FakeRobot:
     def move_free(self, p, R): return self._do("free", p, R)
     def move_line(self, p, R, collisions=True): return self._do("line", p, R)
     def gripper(self, pos): return self._do(f"grip{pos}")
-    def park(self): return self._do("park")
+    def look(self): return self._do("look")
     def cancel(self): self.calls.append("cancel")
 
     def wait(self, s):
@@ -127,7 +162,7 @@ def test_handover_sequence_with_tug():
     ok, msg = Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1))
     assert ok, msg
     assert r.calls == [f"grip{config.GRIPPER_OPEN}", "free", "line", f"grip{config.GRIPPER_CLOSED}", "line",
-                       "free", f"grip{config.GRIPPER_OPEN}", "line", "park"]
+                       "free", f"grip{config.GRIPPER_OPEN}", "line", "look"]
 
 
 def test_handover_release_button():

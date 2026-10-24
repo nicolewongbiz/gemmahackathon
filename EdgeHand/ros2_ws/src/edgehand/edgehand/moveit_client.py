@@ -15,14 +15,14 @@ from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Pose
 from moveit_msgs.msg import CollisionObject
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
-from moveit_msgs.msg import (Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes,
+from moveit_msgs.msg import (Constraints, MotionPlanRequest, MoveItErrorCodes,
                              OrientationConstraint, PositionConstraint)
 from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath
 from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
 from edgehand import config
-from edgehand.geometry import quat_from_R
+from edgehand.geometry import look_pose, quat_from_R
 
 def pose_msg(p, R):
     m = Pose()
@@ -163,12 +163,8 @@ class MoveItRobot:
         # closing on a tool stalls before reaching the setpoint: that's a successful grasp
         return r is not None and (r.reached_goal or r.stalled)
 
-    def park(self):
-        c = Constraints()
-        for i, q in enumerate(config.PARK_JOINTS):
-            c.joint_constraints.append(JointConstraint(joint_name=f"joint_{i + 1}", position=q, tolerance_above=0.01,
-                                                       tolerance_below=0.01, weight=1.0))
-        return self._plan_and_go(c)
+    def look(self):
+        return self.move_free(*look_pose())
 
     def efforts(self):
         return dict(self._efforts)

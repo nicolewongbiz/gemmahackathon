@@ -3,7 +3,7 @@ without hardware or MoveIt:
     /move_action, /execute_trajectory, /robotiq_gripper_controller/gripper_cmd   (succeed, log the goal)
     /compute_cartesian_path, /apply_planning_scene                                (succeed)
     /joint_states with efforts; publish std_msgs/Empty on /test/pull to simulate the operator's tug
-    /image_raw: synthetic overhead frame with a phillips screwdriver (test/synthetic.py)
+    config.CAMERA_TOPIC: synthetic tray frame with a phillips and a flathead screwdriver (test/synthetic.py)
 """
 import sys, threading, time
 from pathlib import Path
@@ -24,6 +24,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import synthetic                                                      # noqa: E402
+from edgehand import config                                           # noqa: E402
 
 JOINTS = [f"joint_{i}" for i in range(1, 8)]
 
@@ -43,9 +44,10 @@ class FakeCell(Node):
         self.create_service(GetCartesianPath, "/compute_cartesian_path", self.on_cartesian, callback_group=cb)
         self.create_service(ApplyPlanningScene, "/apply_planning_scene", self.on_scene, callback_group=cb)
         self.js = self.create_publisher(JointState, "/joint_states", 10)
-        self.img = self.create_publisher(Image, "/image_raw", 1)
+        self.img = self.create_publisher(Image, config.CAMERA_TOPIC, 1)
         self.create_subscription(Empty, "/test/pull", lambda _: setattr(self, "pulling", True), 10)
-        self.frame = synthetic.frame([("phillips", grasp_xy, handle_dir)])[:, :, ::-1].copy()   # BGR -> rgb8
+        self.frame = synthetic.frame([("phillips", grasp_xy, handle_dir),
+                                      ("flathead", (0.47, -0.10), (1.0, 0.0))])[:, :, ::-1].copy()   # BGR -> rgb8
         self.create_timer(0.02, self.pub_joints)
         self.create_timer(0.2, self.pub_image)
 

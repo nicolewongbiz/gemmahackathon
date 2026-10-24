@@ -72,6 +72,17 @@ def main():
     results["Pi REQUEST + RELEASE over UDP"] = held and done
     print("--- scenario 3 states:", [s for s in c.states if not s.startswith("holding: delta")])
 
+    # 4. a tool that isn't on the tray: says what it can see, doesn't move past the look pose
+    c.reset()
+    time.sleep(0.5)
+    c.req.publish(String(data="torx"))
+    told = c.spin_until(lambda: any("can't see the torx" in s for s in c.says), 60)
+    c.spin_until(lambda: "idle" in c.states, 5)
+    moves = [s for s in c.cell if s.startswith(("cartesian", "gripper"))]
+    results["missing tool: says what it sees, no pick"] = told and not moves and any(
+        "phillips" in s and "flathead" in s for s in c.says)
+    print("--- scenario 4 says:", c.says, "| moves:", moves)
+
     print("\n".join(f"{'PASS' if ok else 'FAIL'}  {name}" for name, ok in results.items()))
     sys.exit(0 if all(results.values()) else 1)
 

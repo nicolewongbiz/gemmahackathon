@@ -11,14 +11,37 @@ TOOLS = {
     "torx":     [((45, 100, 60), (85, 255, 255))],                                      # green handle
 }
 DEFAULT_TOOL = "phillips"          # what the Pi REQUEST button asks for
+# What each tool looks like from above, in words, for Gemma naming the numbered tools (VISION_NAMER = "gemma").
+# Gemma can't see a screwdriver tip from the look pose, so describe what IS visible: the handle.
+TOOL_DESCRIPTIONS = {
+    "phillips": "screwdriver with a red handle",
+    "flathead": "screwdriver with a yellow handle",
+    "torx": "screwdriver with a green handle",
+}
 
 # ---- Gemma 4 intent parser (LiteRT-LM, workstation) ----
 GEMMA_MODEL = os.environ.get("EDGEHAND_MODEL", str(ROOT / "models" / "gemma-4-E4B-it.litertlm"))
 GEMMA_USE_GPU = True               # falls back to CPU if the GPU backend fails
 GEMMA_RETRIES = 2
 
-# ---- Camera + calibration (Jetson, fixed overhead USB camera) ----
-CAMERA_TOPIC = "/image_raw"        # v4l2_camera default
+# ---- Camera: Kinova Vision module on the wrist (eye-in-hand) + calibration ----
+ROBOT_IP = "192.168.1.10"
+# "usb"   = a camera on the wrist cabled to this computer (our Intel RealSense: its colour camera is a UVC webcam)
+# "rtsp"  = the Kinova Vision module, streamed through the arm (this arm doesn't have one)
+# "topic" = a ROS image topic (e.g. realsense2_camera's /camera/camera/color/image_raw)
+CAMERA_SOURCE = "usb"
+CAMERA_USB_INDEX = 0               # OpenCV index; find it with: python -m edgehand.camera --list
+CAMERA_RTSP = f"rtsp://{ROBOT_IP}/color"
+FRAME_W, FRAME_H = 1280, 720
+CAMERA_TOPIC = "/camera/camera/color/image_raw"   # for CAMERA_SOURCE = "topic"
+# The camera rides on the wrist, so frames are only used from the look pose: gripper straight down, high over the
+# tray. Flange (end_effector_link) position + Kortex theta_x/y/z. From the GemmaHackathon sim: tool frame at
+# (0.40, 0, 0.50) = flange at z 0.62 reaches and sees tags across x 0.32-0.62, y +-0.25 past the fingers;
+# 0.55 / 0.67 is out of reach pointing down. VERIFY: jog there in the Web App, check all 4 tags are in view.
+LOOK_FLANGE_XYZ = (0.40, 0.0, 0.62)
+LOOK_THETA = (180.0, 0.0, 90.0)    # Kortex Euler (deg, extrinsic XYZ): pointing straight down
+LOOK_SETTLE_S = 0.5                # wait at the look pose before the frame (no motion blur)
+LOCATE_SKIP_FRAMES = 5             # frames to drop after a locate request (the RTSP stream lags a few frames)
 TABLE_TAGS = {                     # tag36h11 id -> tag centre (x, y). MEASURE ON SITE (README Phase 1.4)
     0: (0.35, -0.20),
     1: (0.35, 0.20),
@@ -30,6 +53,10 @@ TABLE_Z = 0.0                      # table surface height in the base frame
 SHAFT_MIN_VAL = 140                # shaft = bright (HSV V) and unsaturated; a lit dark mat stays below this
 TOOL_MIN_AREA_PX = 800             # smaller blobs are noise
 SHAFT_MAX_SAT = 70                 # shaft = low saturation (metal); handle = its TOOLS colour
+GRIP_MIN_SAT, GRIP_MIN_VAL = 90, 60    # find_tools: any colourful grip (black grips vanish on a dark mat)
+# Who names each found tool: "gemma" (numbered marks + TOOL_DESCRIPTIONS) or "colour" (TOOLS HSV ranges)
+VISION_NAMER = "gemma"
+VISION_GEMMA_MODEL = os.environ.get("EDGEHAND_VISION_MODEL", GEMMA_MODEL)   # E4B .litertlm (vision encoder)
 TOOL_RADIUS_M = 0.012              # grasp height above the table (shaft lies on the handle's radius)
 GRASP_FROM_FERRULE_M = 0.02        # grasp the shaft this far from where the handle ends
 
@@ -43,9 +70,6 @@ EE_LINK = "end_effector_link"      # tip of the manipulator group = the flange
 TCP_OFFSET_M = 0.165
 FINGERS_ALONG = "x"                # flange axis the 2F-85 fingers close along (check in RViz, Phase 1.6)
 HOVER_M = 0.12                     # approach / lift height above the grasp
-# Kinova "Retract" (joint_1..7, rad): folded by the base, out of the overhead camera's view. The arm parks here
-# before vision looks at the tray and after each handover (in Home it hangs over the tray and hides the tools).
-PARK_JOINTS = [0.0, -0.35, 3.14, -2.55, 0.0, -0.87, 1.57]
 VEL_SCALE, ACC_SCALE = 0.2, 0.2
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.8

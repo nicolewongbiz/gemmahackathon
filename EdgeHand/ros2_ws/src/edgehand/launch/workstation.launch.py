@@ -1,4 +1,5 @@
-"""Workstation: MoveIt + ros2_kortex driver (one launch, it starts the driver itself) + EdgeHand nodes.
+"""Workstation: MoveIt + ros2_kortex driver (one launch, it starts the driver itself) + EdgeHand nodes, including
+vision_node (the wrist camera is cabled to this machine).
     ros2 launch edgehand workstation.launch.py robot_ip:=192.168.1.10
     ros2 launch edgehand workstation.launch.py robot_ip:=0.0.0.0 use_fake_hardware:=true require_pi:=false
 """
@@ -17,7 +18,10 @@ def generate_launch_description():
             DeclareLaunchArgument("use_fake_hardware", default_value="false"),
             DeclareLaunchArgument("launch_rviz", default_value="true"),
             DeclareLaunchArgument("require_pi", default_value="true"),
-            DeclareLaunchArgument("with_moveit", default_value="true")]
+            DeclareLaunchArgument("with_moveit", default_value="true"),
+            DeclareLaunchArgument("camera", default_value="usb"),        # usb | rtsp | topic
+            DeclareLaunchArgument("namer", default_value="gemma"),       # gemma | colour
+            DeclareLaunchArgument("show", default_value="false")]
     moveit = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare("kinova_gen3_7dof_robotiq_2f_85_moveit_config"), "launch", "robot.launch.py"])),
@@ -28,6 +32,9 @@ def generate_launch_description():
     return LaunchDescription(args + [
         moveit,
         Node(package="edgehand", executable="intent_node", output="screen"),
+        Node(package="edgehand", executable="vision_node", output="screen",
+             parameters=[{"camera": LaunchConfiguration("camera"), "namer": LaunchConfiguration("namer"),
+                          "show": ParameterValue(LaunchConfiguration("show"), value_type=bool)}]),
         Node(package="edgehand", executable="handover_node", output="screen"),
         Node(package="edgehand", executable="pi_bridge", output="screen",
              parameters=[{"require_pi": ParameterValue(LaunchConfiguration("require_pi"), value_type=bool)}]),

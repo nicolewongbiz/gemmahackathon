@@ -1,8 +1,8 @@
 """Overhead camera -> where each tool is and where to grasp it.
 
 Calibration: 4 AprilTags (tag36h11) at measured base-frame positions -> pixel->table homography.
-Detection: tools on a dark mat. Handle colour = class (config.TOOLS); the grey, unsaturated part touching one end of
-the handle is the shaft. The grasp point is on the SHAFT, GRASP_FROM_FERRULE_M from the handle, so the robot can
+Detection: tools on a dark mat. A colourful grip with a grey, unsaturated part sticking out of one end = a tool; the
+grey part is the shaft. Naming is separate: by handle colour (config.TOOLS) or by Gemma (namer.py). The grasp point is on the SHAFT, GRASP_FROM_FERRULE_M from the handle, so the robot can
 present the handle to the operator.
 """
 import cv2
@@ -57,9 +57,13 @@ def _mask(hsv, ranges):
     return m
 
 
-def detect_tools(frame, tmap):
-    """List of {"tool", "grasp_xy", "handle_dir", "grasp_px", "handle_px", "area"}, biggest first.
-    handle_dir is a unit vector (table frame) pointing from the grasp point towards the handle."""
+def find_tools(frame, tmap):
+    """Every tool on the mat, unnamed: a colourful grip with a metal end. Biggest first. Each is
+    {"grasp_xy", "handle_dir", "grasp_px", "handle_px", "area", "contour", "colour"}; handle_dir is a unit vector
+    (table frame) from the grasp point towards the grip, "colour" is the TOOLS class whose HSV range covers the grip
+    (or None). Names come from colour_class or namer.GemmaNamer."""
+    if tmap.H is None:
+        return []
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     ignore = tmap.tag_mask(frame.shape)
     k = np.ones((5, 5), np.uint8)
@@ -67,37 +71,73 @@ def detect_tools(frame, tmap):
     shaft[ignore > 0] = 0
     shaft = cv2.morphologyEx(shaft, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     out = []
-    for name, ranges in config.TOOLS.items():
-        m = _mask(hsv, ranges)
-        m[ignore > 0] = 0
+    for c in _grip_contours(hsv, ignore):
+        area = cv2.contourArea(c)
+        pts = c.reshape(-1, 2).astype(float)
+        centre = pts.mean(axis=0)
+        axis = np.linalg.svd(pts - centre)[2][0]                 # grip's long axis (px)
+        proj = (pts - centre) @ axis
+        length = proj.max() - proj.min()
+        ends = [centre + axis * proj.min(), centre + axis * proj.max()]
+        # the metal part sticks out of one end: count shaft pixels just beyond each end
+        scores = []
+        for e, sgn in zip(ends, (-1, 1)):
+            probe = np.zeros_like(shaft)
+            a, b = e + axis * sgn * 0.05 * length, e + axis * sgn * 0.6 * length
+            cv2.line(probe, tuple(map(int, a)), tuple(map(int, b)), 255, max(3, int(0.15 * length)))
+            scores.append(int(np.count_nonzero(probe & shaft)))
+        if max(scores) < 0.05 * length * 3 or max(scores) < 2 * min(scores):
+            continue                                              # no metal end, or can't tell which end has it
+        ferrule_px = ends[int(np.argmax(scores))]
+        ferrule, handle = tmap.px_to_table(*ferrule_px), tmap.px_to_table(*centre)
+        d = handle - ferrule
+        d /= np.linalg.norm(d)
+        grasp = ferrule - d * config.GRASP_FROM_FERRULE_M
+        out.append({"grasp_xy": grasp, "handle_dir": d, "grasp_px": tmap.table_to_px(*grasp), "handle_px": centre,
+                    "area": area, "contour": c, "colour": colour_class(hsv, c)})
+    return sorted(out, key=lambda t: -t["area"])
+
+
+def _grip_contours(hsv, ignore):
+    """Colourful grips, split by hue so two touching grips of different colours stay two tools. Hue bands of +-16 degrees
+    every 16 degrees; a grip found in two neighbouring bands is kept once (the bigger outline)."""
+    k = np.ones((5, 5), np.uint8)
+    grips = cv2.inRange(hsv, (0, config.GRIP_MIN_SAT, config.GRIP_MIN_VAL), (180, 255, 255))
+    grips[ignore > 0] = 0
+    hue = hsv[:, :, 0].astype(np.int16)
+    found = []
+    for centre in range(0, 180, 8):                                  # OpenCV hue: 0-180, i.e. 2 degrees per unit
+        dist = np.abs((hue - centre + 90) % 180 - 90)
+        m = np.where(dist <= 8, grips, 0).astype(np.uint8)
         m = cv2.morphologyEx(cv2.morphologyEx(m, cv2.MORPH_OPEN, k), cv2.MORPH_CLOSE, k)
         for c in cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]:
-            area = cv2.contourArea(c)
-            if area < config.TOOL_MIN_AREA_PX:
-                continue
-            pts = c.reshape(-1, 2).astype(float)
-            centre = pts.mean(axis=0)
-            axis = np.linalg.svd(pts - centre)[2][0]                 # handle's long axis (px)
-            proj = (pts - centre) @ axis
-            length = proj.max() - proj.min()
-            ends = [centre + axis * proj.min(), centre + axis * proj.max()]
-            # the shaft sticks out of one end: count shaft pixels just beyond each end
-            scores = []
-            for e, sgn in zip(ends, (-1, 1)):
-                probe = np.zeros_like(shaft)
-                a, b = e + axis * sgn * 0.05 * length, e + axis * sgn * 0.6 * length
-                cv2.line(probe, tuple(map(int, a)), tuple(map(int, b)), 255, max(3, int(0.15 * length)))
-                scores.append(int(np.count_nonzero(probe & shaft)))
-            if max(scores) < 0.05 * length * 3 or max(scores) < 2 * min(scores):
-                continue                                              # no shaft, or can't tell which end has it
-            ferrule_px = ends[int(np.argmax(scores))]
-            ferrule, handle = tmap.px_to_table(*ferrule_px), tmap.px_to_table(*centre)
-            d = handle - ferrule
-            d /= np.linalg.norm(d)
-            grasp = ferrule - d * config.GRASP_FROM_FERRULE_M
-            out.append({"tool": name, "grasp_xy": grasp, "handle_dir": d, "grasp_px": tmap.table_to_px(*grasp),
-                        "handle_px": centre, "area": area})
-    return sorted(out, key=lambda t: -t["area"])
+            if cv2.contourArea(c) >= config.TOOL_MIN_AREA_PX:
+                found.append(c)
+    found.sort(key=lambda c: -cv2.contourArea(c))
+    kept = []
+    for c in found:
+        p = c.reshape(-1, 2).mean(axis=0)
+        if all(cv2.pointPolygonTest(o, (float(p[0]), float(p[1])), False) < 0 for o in kept):
+            kept.append(c)
+    return kept
+
+
+def colour_class(hsv, contour):
+    """The TOOLS class whose HSV ranges cover most of the grip (at least half of it), else None."""
+    m = np.zeros(hsv.shape[:2], np.uint8)
+    cv2.drawContours(m, [contour], -1, 255, -1)
+    n = max(1, np.count_nonzero(m))
+    best, frac = None, 0.5
+    for name, ranges in config.TOOLS.items():
+        f = np.count_nonzero(_mask(hsv, ranges) & m) / n
+        if f > frac:
+            best, frac = name, f
+    return best
+
+
+def detect_tools(frame, tmap):
+    """find_tools named by handle colour (config.TOOLS); tools whose colour matches no class are dropped."""
+    return [dict(t, tool=t["colour"]) for t in find_tools(frame, tmap) if t["colour"]]
 
 
 def draw(frame, tmap, tools):
@@ -108,7 +148,7 @@ def draw(frame, tmap, tools):
         g, h = tuple(map(int, t["grasp_px"])), tuple(map(int, t["handle_px"]))
         cv2.arrowedLine(out, g, h, (255, 255, 0), 2, tipLength=0.2)
         cv2.circle(out, g, 8, (0, 0, 255), -1)
-        cv2.putText(out, f"{t['tool']} {t['grasp_xy'][0]:.3f},{t['grasp_xy'][1]:.3f}", (g[0] + 10, g[1] - 10),
+        cv2.putText(out, f"{t.get('tool') or '?'} {t['grasp_xy'][0]:.3f},{t['grasp_xy'][1]:.3f}", (g[0] + 10, g[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     cv2.putText(out, "CALIBRATED" if tmap.H is not None else "NOT CALIBRATED: need tags " + str(list(config.TABLE_TAGS)),
                 (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0) if tmap.H is not None else (0, 0, 255), 2)
