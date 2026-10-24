@@ -4,6 +4,8 @@ Read-only Kortex API: it never commands motion. You jog the arm (Web App or joys
     python -m edgehand.measure_tags            tags + table heights, one tag at a time (README Phase 1.4 / 1.6)
     python -m edgehand.measure_tags --look     print the current pose as LOOK_FLANGE_XYZ / LOOK_THETA
     python -m edgehand.measure_tags --once     print what it reads right now and exit
+    python -m edgehand.measure_tags --gripper  finger position closed on nothing vs on the thinnest shaft
+                                               -> GRIPPER_EMPTY_POS (close the gripper yourself; this only reads)
 
 For each tag: close the gripper, point it straight down, and jog until the closed fingertips just pinch a sheet of
 paper on the tag's centre. The fingertip x, y is the tag centre; the flange z is that tag's TABLE_TOUCH_Z.
@@ -32,6 +34,7 @@ class Arm:
         self.session = SessionManager(router)
         self.session.CreateSession(info)
         self.base = BaseClient(router)
+        self.router = router
         # the Kortex tool frame sits this far along tool z from the flange (Web App -> Configurations -> Tool)
         self.tool_z = ControlConfigClient(router).GetToolConfiguration().tool_transform.z
 
@@ -43,6 +46,27 @@ class Arm:
         flange = np.array([p.x, p.y, p.z]) - R[:, 2] * self.tool_z
         tip = flange + R[:, 2] * config.FINGERTIP_CLOSED_M
         return flange, R, tip, (p.x, p.y, p.z), theta
+
+    def gripper_pct(self):
+        """Robotiq finger position, 0 (open) .. 100 (closed), from the base's cyclic feedback (UDP session)."""
+        from kortex_api.UDPTransport import UDPTransport
+        from kortex_api.RouterClient import RouterClient
+        from kortex_api.SessionManager import SessionManager
+        from kortex_api.autogen.client_stubs.BaseCyclicClientRpc import BaseCyclicClient
+        from kortex_api.autogen.messages import Session_pb2
+        udp = UDPTransport()
+        router = RouterClient(udp, lambda e: None)
+        udp.connect(config.ROBOT_IP, 10001)
+        info = Session_pb2.CreateSessionInfo()
+        info.username, info.password = "admin", "admin"
+        info.session_inactivity_timeout, info.connection_inactivity_timeout = 60000, 2000
+        sm = SessionManager(router)
+        sm.CreateSession(info)
+        try:
+            return BaseCyclicClient(router).RefreshFeedback().interconnect.gripper_feedback.motor[0].position
+        finally:
+            sm.CloseSession()
+            udp.disconnect()
 
     def close(self):
         self.session.CloseSession()
@@ -57,10 +81,24 @@ def tilt_deg(R):
 def main():
     arm = Arm()
     try:
+        if "--gripper" in sys.argv:
+            input("Close the gripper on NOTHING (Web App / joystick), wait until it stops. ENTER to read...")
+            empty = arm.gripper_pct()
+            input("Now open it, put the THINNEST shaft between the pads, close it on the shaft. ENTER to read...")
+            held = arm.gripper_pct()
+            mid = (empty + held) / 2
+            # Kortex 0..100 % maps to the ROS finger joint 0..0.8 rad
+            print(f"closed on nothing: {empty:.1f} %  ({0.8 * empty / 100:.3f} rad)")
+            print(f"closed on shaft:   {held:.1f} %  ({0.8 * held / 100:.3f} rad)")
+            print(f"GRIPPER_EMPTY_POS = {0.8 * mid / 100:.3f}   (midpoint {mid:.1f} %; past this after the lift = missed grasp)")
+            if empty - held < 5:
+                print("WARNING: less than 5 % between empty and holding: a miss would be hard to tell from a grasp")
+            return
         if "--once" in sys.argv or "--look" in sys.argv:
             flange, R, tip, tool, theta = arm.read()
             print(f"Kortex tool pose {np.round(tool, 4)} theta {np.round(theta, 1)} (tool frame z {arm.tool_z:.3f})")
             print(f"flange {np.round(flange, 4)}, fingertips {np.round(tip, 4)}, {tilt_deg(R):.1f} deg from straight down")
+            print(f"gripper {arm.gripper_pct():.1f} % closed")
             if "--look" in sys.argv:
                 print(f"\nLOOK_FLANGE_XYZ = ({flange[0]:.3f}, {flange[1]:.3f}, {flange[2]:.3f})")
                 print(f"LOOK_THETA = ({theta[0]:.1f}, {theta[1]:.1f}, {theta[2]:.1f})")
