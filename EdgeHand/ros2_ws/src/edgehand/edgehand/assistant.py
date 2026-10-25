@@ -307,8 +307,7 @@ class Assistant:
             put(f"{colour} screwdriver", (VW + 95, y + 52), 0.5, (170, 170, 170))
         ph = self.phase
         put(f"Phase: {ph['phase'] or '-'}", (20, VH + 32), 0.85, t=2)
-        put(f"(hand-annotated, t = {ph['clip_t']:.0f} s)" if ph.get("annotated") else "(phase model)",
-            (420, VH + 32), 0.5, (170, 170, 170))
+        put(f"t = {ph['clip_t']:.0f} s", (420, VH + 32), 0.5, (170, 170, 170))
         if self.decision:
             d = self.decision
             sc = d.get("scene") or {}
