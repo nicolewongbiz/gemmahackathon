@@ -272,9 +272,15 @@ def find_tools_contrast(frame, tmap):
     diff = np.abs(img.astype(np.int16) - bg.astype(np.int16)).max(axis=2)
     mask = ((diff > config.CONTRAST_MIN) & (tagm == 0) & ~unseen).astype(np.uint8) * 255
     edge = cv2.dilate(unseen.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
-    k3 = max(3, int(0.0015 * k)) | 1
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((k3, k3), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((k3 + 2, k3 + 2), np.uint8))
+    # Precision screwdrivers have ~2 mm shafts (4 px here): a morphological opening ate them, leaving handle-only
+    # blobs that fail the shape test. So: bridge small gaps with a closing, then drop specks by AREA instead.
+    kc = max(3, int(config.MASK_CLOSE_M * k)) | 1
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((kc, kc), np.uint8))
+    n_cc, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    speck = int(config.MASK_SPECK_M2 * k * k)
+    for i in range(1, n_cc):
+        if stats[i, cv2.CC_STAT_AREA] < speck:
+            mask[labels == i] = 0
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     out = []
     for c in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]:

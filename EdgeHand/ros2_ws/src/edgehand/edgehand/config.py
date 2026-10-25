@@ -91,6 +91,8 @@ WARP_MARGIN_M = 0.08               # the top-down view reaches this far past the
 TOOL_MIN_AREA_M2 = 3e-4            # 3 cm^2; a precision screwdriver is ~10
 MIN_ELONGATION = 2.5               # blob length / handle width; rounder blobs aren't tools
 MIN_SHAFT_BEYOND_GRASP_M = 0.015   # shaft needed past the grasp point so the fingers have something to close on
+MASK_CLOSE_M = 0.004               # bridge gaps up to this in the object mask (broken thin shafts)
+MASK_SPECK_M2 = 2e-5               # 0.2 cm^2: smaller connected blobs are specks, not tool parts
 # Who names each found tool: "gemma" (numbered marks + TOOL_DESCRIPTIONS) or "colour" (TOOLS HSV ranges)
 VISION_NAMER = "gemma"
 VISION_GEMMA_MODEL = os.environ.get("EDGEHAND_VISION_MODEL", GEMMA_MODEL)   # E4B .litertlm (vision encoder)
