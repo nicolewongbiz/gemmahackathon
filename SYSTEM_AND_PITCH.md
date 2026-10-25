@@ -1,8 +1,8 @@
 # EdgeHand: Phase-Aware Robotic Instrument Handoff with On-Device Multimodal Gemma 4
 
-*The scrub nurse that never looks away: it watches, asks, and hands it over, fully offline.*
+*The scrub nurse that never looks away: it watches, predicts, and hands it over, fully offline.*
 
-Gemma Hardware Hackathon, AGI House, Oct 24 2026. Track 2 (Gemma in IoT / Robotics / Embedded) and Best Use of LiteRT. Model sizes, Jetson benchmarks and hardware are in [Technical specs](#technical-specs). Submission text for the project page is in [section 9](#9-submission-copy-project-page).
+Gemma Hardware Hackathon, AGI House, Oct 24 2026. Track 2 (Gemma in IoT / Robotics / Embedded) and Best Use of LiteRT. Submission text for the project page is in [section 9](#9-submission-copy-project-page).
 
 > **The idea in one line:** a robot arm that watches the surgery, works out which instrument comes next, *asks* the surgeon, and hands it over handle-first. Gemma 4 runs on-device through LiteRT-LM, and nothing leaves the room.
 
@@ -48,7 +48,7 @@ Gemma Hardware Hackathon, AGI House, Oct 24 2026. Track 2 (Gemma in IoT / Roboti
 
 **Ports.** UDP 5006 carries requests to the arm runner. UDP 5007 carries phase events and arm state to the assistant. HTTP 8089 is the wrist-camera stream and HTTP 8090 is the surgical-video stream. There's no internet and no cloud anywhere.
 
-**Why Gemma runs on the Mac and not the Jetson.** We tested Gemma 4 on the Orin Nano through LiteRT. The GPU path ran out of memory (Vulkan OOM on the 8 GB board) and the CPU path took 31 s per text request. On the Mac's GPU it takes ~1.5 s for text and ~6.5 s with an image. So the Jetson does what it's best at, video and I/O, and the Mac does the reasoning. The phase model is a different story. At 24.6 M parameters it runs on the Jetson's GPU in ~4 ms per second of video (TensorRT FP16, measured; see the specs in section 7).
+**Why Gemma runs on the Mac and not the Jetson.** We tested Gemma 4 on the Orin Nano through LiteRT. The GPU path ran out of memory (Vulkan OOM on the 8 GB board) and the CPU path took 31 s per text request. On the Mac's GPU it takes ~1.5 s for text and ~6.5 s with an image. So the Jetson does what it's best at, video and I/O, and the Mac does the reasoning.
 
 ## 3. End-to-end flow (one handover)
 
@@ -110,51 +110,6 @@ All of it is **Gemma 4 E4B on LiteRT-LM, on the laptop**. One model handles visi
 | Latency: scene + decision / voice command | ~8 s / 1–3 s |
 | **Real arm:** full handovers end to end, including release on tug | **[fill in: N of M on the day]** |
 
-### Technical specs
-
-**Neurosurgical phase model.** Architecture from `NeurosurgicalPhaseRecognition/`, with the training defaults. It was sized and benchmarked with random weights, because the trained weights stay with the clinical data.
-
-| | Spec |
-|---|---|
-| Input | 1 frame per second, 224×224 RGB |
-| Frame encoder | ResNet50 (ImageNet-initialised, fine-tuned on surgery): 23.5 M params, 2048-d feature, 4.1 GMACs per frame |
-| Temporal model | MS-TCN with 2 stages × 8 dilated residual layers and 128 filters: 1.06 M params. Receptive field 1,021 frames (~17 min at 1 fps). 0.63 GMACs for a 10-min window |
-| Output | 4 phases (brain exposure, parent vessel exposure, dome exposure, clipping), Viterbi-smoothed |
-| Size | 24.6 M params in total: 98 MB fp32, 49 MB fp16. TensorRT FP16 engines are 48.0 MB + 2.7 MB |
-| Accuracy | 95.7% frame accuracy on held-out videos (48 surgeries, 40,725 frames) |
-
-**It fits on the Jetson Orin Nano Super.** We measured it on our board with TensorRT 10.3 FP16 (`trtexec`, JetPack 6.2):
-
-| Stage | Mean latency | Throughput | GPU memory |
-|---|---|---|---|
-| ResNet50 encoder, one frame | 2.34 ms | 436 frames/s | 96 MiB |
-| MS-TCN over a 10-min window (600 frames) | 1.75 ms | 694 windows/s | 159 MiB |
-
-- At 1 frame per second, the full model uses about 4 ms of GPU time each second (under 0.5%) and ~255 MiB of the board's 8 GB. That leaves the Jetson free for the video feed and the camera relay.
-- Building the engines is a one-off and peaks at 1.7 GB of CPU RAM.
-- For comparison, PyTorch on the Mac's CPU takes 53 ms per frame.
-- As trained, the MS-TCN is offline: it looks at frames on both sides. A live version re-runs it each second over the frames so far, which costs under 2 ms, or switches to causal convolutions.
-
-**Gemma 4 E4B (LiteRT-LM)**
-
-| | Spec |
-|---|---|
-| Model file | `gemma-4-E4B-it.litertlm`, 3.66 GB. Text, vision and audio are in one file |
-| On-device caches | ~350 MB of compiled encoders and GPU programs, built on the first run |
-| Where it runs | MacBook, Apple M5, 24 GB unified memory, LiteRT-LM GPU backend (vision encoder on CPU) |
-| Latency | Text ~1.5 s, image + text ~6.5 s, one voice command 1–3 s |
-| On the Jetson | GPU: out of memory (Vulkan). CPU: 31 s per text request. So it stays on the Mac |
-
-**Hardware**
-
-| | Spec |
-|---|---|
-| NVIDIA Jetson Orin Nano Super dev kit | 8 GB LPDDR5 (7.6 GB usable), 1024-core Ampere GPU with 32 Tensor Cores, 6-core Arm Cortex-A78AE, up to 67 TOPS INT8. L4T R36.4.7, TensorRT 10.3 |
-| Kinova Gen3 | 7 DoF, 902 mm reach, torque sensing in every joint. Kortex API over Ethernet |
-| Robotiq 2F-85 | Parallel gripper with an 85 mm stroke |
-| Intel RealSense D435 | On the wrist. We use the colour stream; the stereo depth stream is unused today |
-| Links | One USB-C cable from the Mac to the Jetson (192.168.55.x). Ethernet from the arm to the Jetson (192.168.1.x), with NAT. UDP/JSON events on :5006 and :5007, MJPEG on :8089 and :8090 |
-
 ---
 
 ## 8. The pitch (90 seconds)
@@ -193,8 +148,7 @@ All of it is **Gemma 4 E4B on LiteRT-LM, on the laptop**. One model handles visi
 - **Why not run Gemma on the Jetson?** We tried: LiteRT's GPU path ran out of memory on the 8 GB Orin Nano and the CPU path took 31 s per request. The laptop does it in 1.5–8 s, so the Jetson handles video and the laptop handles reasoning.
 - **How fast is it?** About 8 s from a phase change to the question, 1–3 s for a voice command, and 20–40 s for a handover at a deliberately slow 20% speed.
 - **What about patient data?** None is used or shown. The clip is public and licensed, and the clinical labels and weights never left their source.
-- **Does the phase model fit on the Jetson?** Yes. It has 24.6 M parameters (49 MB in fp16). With TensorRT FP16 on our Orin Nano Super, it takes 2.3 ms per frame for ResNet50 plus 1.75 ms per 10-minute window for the MS-TCN, using ~255 MiB of GPU memory. Gemma is the model that doesn't fit.
-- **What would you build next?** Run the phase model live on the Jetson (TensorRT engines already built and benchmarked), feed Gemma's scene features into it alongside the CNN features, and use real surgical instruments with a 3D grasp from the RealSense depth stream.
+- **What would you build next?** Run the phase model on the Jetson (TensorRT), feed Gemma's scene features into it alongside the CNN features, and use real surgical instruments with a 3D grasp from the RealSense depth stream.
 
 ---
 
@@ -236,14 +190,14 @@ Pull the network cable and nothing changes.
 - The arm calibrates the table with fingertip touches and refuses any grasp that would bring it within 4 mm of the surface.
 - A human holds the red E-stop throughout.
 
-**Grounded in real neurosurgical AI.** The phase signal comes from our own surgical phase-recognition model: **95.7% accuracy on 48 expert-annotated aneurysm-clipping surgeries** (ResNet50 + MS-TCN). Its weights are tied to protected clinical data, so the demo replays a prepared phase timeline on a public surgical video. Everything Gemma does on top of it is live. The phase model has 24.6 M parameters, and with TensorRT on the Jetson's GPU it needs about 4 ms per second of video, so it is ready to run live next to the camera. We also measured Gemma reading phases on its own: 3 of 7 correct. That's exactly why EdgeHand pairs a specialised phase model with Gemma's reasoning and conversation.
+**Grounded in real neurosurgical AI.** The phase signal comes from our own surgical phase-recognition model: **95.7% accuracy on 48 expert-annotated aneurysm-clipping surgeries** (ResNet50 + MS-TCN). Its weights are tied to protected clinical data, so the demo replays a prepared phase timeline on a public surgical video. Everything Gemma does on top of it is live. We also measured Gemma reading phases on its own: 3 of 7 correct. That's exactly why EdgeHand pairs a specialised phase model with Gemma's reasoning and conversation.
 
 **Next:** real surgical instruments with 3D grasping from the depth camera, the phase model running live on the Jetson, and testing with surgical teams.
 
 ### Tech stack
 
 - **AI:** Gemma 4 E4B (vision, audio and text in one model), on-device via **Google LiteRT-LM** (GPU, fully offline)
-- **Surgical phase recognition:** PyTorch, ResNet50 features + MS-TCN temporal model + Viterbi decoding (95.7% on 48 aneurysm-clipping videos; 24.6 M params), exported to ONNX and **NVIDIA TensorRT FP16** on the Jetson (2.3 ms per frame)
+- **Surgical phase recognition:** PyTorch, ResNet50 features + MS-TCN temporal model + Viterbi decoding (95.7% on 48 aneurysm-clipping videos)
 - **Robot:** Kinova Gen3 7-DoF arm + Robotiq 2F-85 gripper, controlled through the **Kinova Kortex API** (Python)
 - **Vision:** Intel RealSense D435 on the wrist, OpenCV, AprilTag table calibration, contrast segmentation, and colour-accent instrument identification
 - **Edge compute:**
