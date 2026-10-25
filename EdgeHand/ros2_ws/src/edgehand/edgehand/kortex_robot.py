@@ -184,7 +184,16 @@ class KortexRobot:
         h = self.base.OnNotificationActionTopic(cb, B.NotificationOptions())
         try:
             self._stopped = False
-            self.base.ExecuteAction(a)
+            try:
+                self.base.ExecuteAction(a)
+            except Exception as e:                     # KServerException: e.g. SESSION_NOT_IN_CONTROL
+                msg = str(e)
+                if "NOT_IN_CONTROL" in msg:
+                    self.log("kortex: the arm refused the command: another session has control (the Web App's jog "
+                             "panel or a gamepad). Leave that panel, then retry.")
+                else:
+                    self.log(f"kortex: ExecuteAction failed: {msg.splitlines()[0][:160]}")
+                return False
             if not started.wait(5.0):
                 self.log("kortex: the action never reported START; stopping")
                 self.base.Stop()
