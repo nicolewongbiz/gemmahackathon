@@ -145,6 +145,23 @@ No ROS, no MoveIt, no learned grasping: a calibrated camera, classical vision, a
 | Size | 24.6 M params in total: 98 MB fp32, 49 MB fp16. TensorRT FP16 engines are 48.0 MB + 2.7 MB |
 | Accuracy | 95.7% frame accuracy on held-out videos (48 surgeries, 40,725 frames) |
 
+**How the phase model was built** (`NeurosurgicalPhaseRecognition/`, offline, on the clinical data).
+
+*Data.* 48 aneurysm-clipping surgeries, annotated frame by frame by experts into four phases: **Brain Exposure → Parent Vessel Identification → Dome and Neck Identification → Clipping** (the separate "neck" and "dome" annotations are merged into one phase; out-of-scope labels such as fluorescence segments are masked out of the loss with `ignore_index`). Labels are stored as one integer per frame at 1 frame/s, 40,725 labelled frames in all.
+
+*Stage 1: frame encoder.* A **ResNet50 initialised from ImageNet** (torchvision's `IMAGENET1K_V2` weights) with its classification head replaced by a 2048→4 linear layer. It is **fine-tuned end to end on surgical frames** rather than used frozen: AdamW with two learning rates (a small one for the pretrained trunk, a larger one for the new head), batch 32, 224×224 inputs with ImageNet normalisation, and light augmentation (horizontal flip, brightness/contrast jitter), 10 epochs, best checkpoint by validation loss. The point of this stage is not the frame classifier itself but the feature space: after fine-tuning, the 2048-d global-average-pooled feature separates surgical content (instruments, tissue, clips) far better than the raw ImageNet feature.
+
+*Stage 2: features.* Every video is sampled at **1 frame per second** and each frame is pushed through the fine-tuned encoder once; the 2048-d feature per second is cached to disk. The temporal model never touches pixels again, which is what makes training it fast and running it on the Jetson cheap.
+
+*Stage 3: temporal model.* A **multi-stage temporal convolutional network (MS-TCN)** over the feature sequence of a whole video: 2 stages × 8 dilated residual layers (kernel 3, dilation 2ⁱ, 128 filters, dropout 0.5). Stage 1 maps features to per-frame phase logits; stage 2 takes stage 1's softmax and refines it, which is what removes short spurious flips. The receptive field is 1,021 s (~17 min), so a frame's phase is read in the context of the quarter hour around it.
+Training: the loss is the **sum over both stages of class-weighted cross-entropy** (weights from the inverse phase frequencies, since Clipping is short and Brain Exposure long) with **label smoothing 0.1**; Gaussian noise (σ = 0.1) on the input features as regularisation; gradient clipping at 1.0; AdamW (lr 5·10⁻⁴, weight decay 10⁻³); a 5-epoch linear warm-up then cosine decay to 10⁻⁶ over 100 epochs; batches of 4 whole videos of different lengths, padded and masked. A feature-level augmentation (random temporal crops to 70–100 % of a video, plus noise) is available for the smaller training runs.
+
+*Split and metrics.* The split is **by video** (80/20, fixed seed): no frames from a test surgery are seen in training, so the 95.7 % is on unseen operations, not unseen frames. Besides frame accuracy and macro-F1 we track the metrics that matter for a phase stream: normalised **edit distance** of the predicted segment sequence, **segmental F1 at 10/25/50 % overlap**, and accuracy with frames within ±5 s of a true transition masked out, because disagreements at boundaries are often annotation ambiguity.
+
+*Stage 4: Viterbi decoding.* Phases in this operation only go forward. The per-frame probabilities are decoded with Viterbi under a **transition matrix**: by default stay = 0.95, advance one phase = 0.04, skip a phase = 0.009, go back = 0.001, anything else effectively forbidden; optionally the matrix is estimated from the training labels' actual transition counts. This turns a frame classifier into a monotone, segment-level phase timeline and removes isolated flips that a plain 15-frame moving average would leave. The same prior is what the demo's phase feed reproduces: a monotone sequence of segments with timestamps.
+
+*Why this stack.* Per-frame CNNs alone confuse visually similar moments (dissection before vs after clipping); the MS-TCN supplies the long context; Viterbi supplies the surgical grammar. The code also contains the baselines we tried on the way: CNN+LSTM and two transformer variants (`training/`), which the MS-TCN beat on edit distance at a fraction of the parameters.
+
 **It fits on the Jetson Orin Nano Super.** We measured it on our board with TensorRT 10.3 FP16 (`trtexec`, JetPack 6.2):
 
 | Stage | Mean latency | Throughput | GPU memory |
