@@ -8,6 +8,8 @@ A Kinova Gen3 hands an operator the tool they ask for, such as "hand me the Phil
 
 **See [EdgeHand/README.md](EdgeHand/README.md) for everything: spec, setup, running, tests and troubleshooting.**
 
+**System flow, where Gemma comes in, and the pitch: [SYSTEM_AND_PITCH.md](SYSTEM_AND_PITCH.md).**
+
 ## Repo layout
 
 | Path | What it is |

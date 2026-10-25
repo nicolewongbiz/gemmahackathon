@@ -7,3 +7,4 @@ ros2_ws/log/
 .pytest_cache/
 models/*.xnnpack_cache
 models/*_cache.bin
+data/calibration_*.json
