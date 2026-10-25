@@ -1,6 +1,8 @@
-# EdgeHand: an offline robotic scrub nurse
+# EdgeHand: Phase-Aware Robotic Instrument Handoff with On-Device Multimodal Gemma 4
 
-Gemma Hardware Hackathon, AGI House, Oct 24 2026. Track 2 (Gemma in IoT / Robotics / Embedded) and Best Use of LiteRT.
+*The scrub nurse that never looks away: it watches, asks, and hands it over, fully offline.*
+
+Gemma Hardware Hackathon, AGI House, Oct 24 2026. Track 2 (Gemma in IoT / Robotics / Embedded) and Best Use of LiteRT. Submission text for the project page is in [section 9](#9-submission-copy-project-page).
 
 > **The idea in one line:** a robot arm that watches the surgery, works out which instrument comes next, *asks* the surgeon, and hands it over handle-first. Gemma 4 runs on-device through LiteRT-LM, and nothing leaves the room.
 
@@ -147,3 +149,61 @@ All of it is **Gemma 4 E4B on LiteRT-LM, on the laptop**. One model handles visi
 - **How fast is it?** About 8 s from a phase change to the question, 1–3 s for a voice command, and 20–40 s for a handover at a deliberately slow 20% speed.
 - **What about patient data?** None is used or shown. The clip is public and licensed, and the clinical labels and weights never left their source.
 - **What would you build next?** Run the phase model on the Jetson (TensorRT), feed Gemma's scene features into it alongside the CNN features, and use real surgical instruments with a 3D grasp from the RealSense depth stream.
+
+---
+
+## 9. Submission copy (project page)
+
+### Title and tagline
+> **EdgeHand: Phase-Aware Robotic Instrument Handoff with On-Device Multimodal Gemma 4**
+> *The scrub nurse that never looks away: it watches, asks, and hands it over, fully offline.*
+
+Other titles:
+- EdgeHand: An Air-Gapped Multimodal Scrub-Nurse Robot for Neurosurgery (stresses offline and neurosurgery)
+- EdgeHand: Phase-Conditioned, Human-Confirmed Instrument Delivery on the Edge (stresses the ask-first safety design)
+- EdgeHand: Anticipatory Surgical Instrument Handoff with Gemma 4 on LiteRT (stresses the LiteRT prize)
+
+Other taglines:
+- *Watches. Asks. Hands it over. Nothing leaves the room.*
+- *It anticipates the next instrument, and asks before it moves.*
+- *Gemma sees the surgery, the surgeon says yes, and the arm delivers, fully on-device.*
+
+### Describe your project
+
+**EdgeHand: the scrub nurse that never looks away.** An offline robotic scrub nurse for neurosurgery, powered by Gemma 4 running entirely on the edge.
+
+**Why neurosurgery needs this.** In an aneurysm clipping, the surgeon works through a microscope on blood vessels a few millimetres wide, right beside a bulge in the artery wall that can rupture. The critical moments come down to seconds and steady hands. Every time the surgeon looks away from the eyepiece, or waits for the right instrument, focus breaks at exactly the wrong time. A great scrub nurse prevents that by having the next instrument ready before it's asked for. That skill takes years to build, and experienced scrub nurses are scarce. The operating room is also the one place you can't send video to the cloud: patient privacy, unreliable connectivity, and zero tolerance for an outage mid-procedure. So the intelligence has to live in the room.
+
+**What EdgeHand does.** It watches the surgery, recognises the phase, sees what's already in the field, anticipates the next instrument, and **asks**: *"Clipping. Shall I bring the clip applier?"* On a spoken "yes", a Kinova Gen3 arm finds the instrument on the tray with its wrist camera, picks it by the handle, and presents it handle-first. When the surgeon pulls, it lets go. The surgeon can speak to it at any time: "no, the suction", "stop", "let go".
+
+**Where Gemma comes in.** One Gemma 4 model handles vision, audio and reasoning, on-device through LiteRT-LM:
+- **It sees:** it reads the microscope frame, counts the instruments in use, and judges whether the aneurysm is exposed and whether a clip is already on.
+- **It reasons:** it combines the surgical phase, the scene and the tray into a choice and a one-line reason.
+- **It listens:** it understands the surgeon's voice directly from audio.
+
+Pull the network cable and nothing changes.
+
+**Built to be trusted near a patient.** Gemma decides *what*, never *how*:
+- It chooses only from the instruments on the tray and never outputs a coordinate.
+- Nothing moves without a spoken "yes".
+- "Stop" and "let go" are hard-wired keywords that never depend on the model.
+- The arm calibrates the table with fingertip touches and refuses any grasp that would bring it within 4 mm of the surface.
+- A human holds the red E-stop throughout.
+
+**Grounded in real neurosurgical AI.** The phase signal comes from our own surgical phase-recognition model: **95.7% accuracy on 48 expert-annotated aneurysm-clipping surgeries** (ResNet50 + MS-TCN). Its weights are tied to protected clinical data, so the live demo replays a hand-annotated phase timeline on a public surgical video. Everything Gemma does on top of it is live. We also measured Gemma reading phases on its own: 3 of 7 correct. That's exactly why EdgeHand pairs a specialised phase model with Gemma's reasoning and conversation.
+
+**Next:** real surgical instruments with 3D grasping from the depth camera, the phase model running live on the Jetson, and testing with surgical teams.
+
+### Tech stack
+
+- **AI:** Gemma 4 E4B (vision, audio and text in one model), on-device via **Google LiteRT-LM** (GPU, fully offline)
+- **Surgical phase recognition:** PyTorch, ResNet50 features + MS-TCN temporal model + Viterbi decoding (95.7% on 48 aneurysm-clipping videos)
+- **Robot:** Kinova Gen3 7-DoF arm + Robotiq 2F-85 gripper, controlled through the **Kinova Kortex API** (Python)
+- **Vision:** Intel RealSense D435 on the wrist, OpenCV, AprilTag table calibration, contrast segmentation, and colour-accent instrument identification
+- **Edge compute:**
+  - **NVIDIA Jetson Orin Nano Super:** surgical video node, camera relay, network bridge to the arm
+  - **MacBook (Apple silicon):** Gemma inference, motion and safety
+- **Voice:** Gemma native audio understanding, macOS on-device speech synthesis, keyword-gated safety commands
+- **Networking:** air-gapped USB-C and Ethernet links, a lightweight UDP/JSON event bus, MJPEG video streams
+- **Safety and testing:** joint-torque tug detection, fingertip-calibrated table plane, MuJoCo physics simulation of the full handover, and pytest unit and integration tests
+- **Languages:** Python, with ROS 2 / MoveIt 2 designs for future clinical integration
