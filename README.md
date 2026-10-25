@@ -10,6 +10,10 @@ A Kinova Gen3 hands an operator the tool they ask for, such as "hand me the Phil
 
 **System flow, where Gemma comes in, and the pitch: [SYSTEM_AND_PITCH.md](SYSTEM_AND_PITCH.md).**
 
+**Demo video (54 s): [demo/edgehand_demo.mp4](demo/edgehand_demo.mp4)**
+
+[![EdgeHand demo](demo/edgehand_demo.jpg)](demo/edgehand_demo.mp4)
+
 ## Repo layout
 
 | Path | What it is |

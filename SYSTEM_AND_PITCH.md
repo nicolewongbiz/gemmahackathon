@@ -4,6 +4,10 @@
 
 Gemma Hardware Hackathon, AGI House, Oct 24 2026. Track 2 (Gemma in IoT / Robotics / Embedded) and Best Use of LiteRT. Model sizes, Jetson benchmarks and hardware are in [Technical specs](#technical-specs). Submission text for the project page is in [section 9](#9-submission-copy-project-page).
 
+**Demo video (54 s):** [demo/edgehand_demo.mp4](demo/edgehand_demo.mp4)
+
+[![EdgeHand demo](demo/edgehand_demo.jpg)](demo/edgehand_demo.mp4)
+
 > **The idea in one line:** a robot arm that watches the surgery, works out which instrument comes next, *asks* the surgeon, and hands it over handle-first. Gemma 4 runs on-device through LiteRT-LM, and nothing leaves the room.
 
 ---
@@ -48,7 +52,7 @@ Gemma Hardware Hackathon, AGI House, Oct 24 2026. Track 2 (Gemma in IoT / Roboti
 
 **Ports.** UDP 5006 carries requests to the arm runner. UDP 5007 carries phase events and arm state to the assistant. HTTP 8089 is the wrist-camera stream and HTTP 8090 is the surgical-video stream. There's no internet and no cloud anywhere.
 
-**Why Gemma runs on the Mac and not the Jetson.** We tested Gemma 4 on the Orin Nano through LiteRT. The GPU path ran out of memory (Vulkan OOM on the 8 GB board) and the CPU path took 31 s per text request. On the Mac's GPU it takes ~1.5 s for text and ~6.5 s with an image. So the Jetson does what it's best at, video and I/O, and the Mac does the reasoning. The phase model is a different story. At 24.6 M parameters it runs on the Jetson's GPU in ~4 ms per second of video (TensorRT FP16, measured; see the specs in section 7).
+**Why Gemma runs on the Mac and not the Jetson.** We tested Gemma 4 on the Orin Nano through LiteRT. The GPU path ran out of memory (Vulkan OOM on the 8 GB board) and the CPU path took 31 s per text request. On the Mac's GPU it takes ~1.5 s for text and ~6.5 s with an image. So the Jetson does what it's best at, video and I/O, and the Mac does the reasoning. The phase model is a different story. At 24.6 M parameters it runs on the Jetson's GPU in ~4 ms per second of video (TensorRT FP16, measured; see the specs in section 7). Gemma 4 **E2B** (the 2 GB GPU build, `gemma-4-E2B-it-gpu.litertlm`) *does* run on the Jetson's GPU through LiteRT-LM (WebGPU accelerator): measured at 1.7 s per short text request after a ~10 s first-call warm-up, alongside the live video feed. It isn't in today's live loop.
 
 ## 3. End-to-end flow (one handover)
 
@@ -179,7 +183,7 @@ How it fits, in one table:
 
 - The 98 MB figure is full precision. On the Jetson the model runs in fp16, which halves it.
 - Size, memory and speed depend only on the architecture, so random weights give the same numbers the trained weights would.
-- By contrast, Gemma 4 E4B is 3.66 GB and doesn't fit (see below). That's why Gemma runs on the laptop and the Jetson is the right home for the phase model.
+- By contrast, Gemma 4 E4B (3.66 GB, the multimodal model we use) doesn't fit on the Jetson's GPU; the smaller E2B does (see below). That's why Gemma runs on the laptop and the Jetson is the right home for the phase model.
 - At 1 frame per second, the phase model leaves the Jetson free for the video feed and the camera relay.
 - Building the engines is a one-off and peaks at 1.7 GB of CPU RAM.
 - For comparison, PyTorch on the Mac's CPU takes 53 ms per frame.
@@ -206,7 +210,10 @@ The whole AI side is one file, `gemma-4-E4B-it.litertlm` (3.66 GB, Gemma 4 E4B i
 
   Later starts reuse them.
 - **Hardware:** a MacBook with an Apple M5 and 24 GB of unified memory. LiteRT-LM allows one GPU process at a time, so the assistant owns the GPU and the arm process names tools by colour.
-- **On the Jetson:** the GPU ran out of memory (Vulkan) and the CPU took 31 s per text request, so Gemma stays on the laptop.
+- **On the Jetson:**
+  - **E4B:** the GPU ran out of memory and the CPU took 31 s per text request, so the full multimodal model runs on the laptop.
+  - **Gemma 4 E2B** (`gemma-4-E2B-it-gpu.litertlm`, 2.0 GB): runs on the Jetson's GPU through LiteRT-LM's WebGPU accelerator. Measured at 1.7 s per short text request after a ~10 s first-call warm-up, with the video feed still running. In a test it picked the clip applier for Clipping and mapped "no, give me the suction" to a request.
+  - The same `.litertlm` format and the same Python API work on both devices. E2B on the Jetson isn't wired into today's live loop yet.
 - **Speech out** uses macOS's built-in on-device voice (`say`). Gemma does the listening; the Mac does the talking.
 
 **Hardware**
@@ -254,7 +261,7 @@ The whole AI side is one file, `gemma-4-E4B-it.litertlm` (3.66 GB, Gemma 4 E4B i
 "Everything you just saw is one Gemma 4 model: one 3.66 GB file, running through LiteRT-LM on this laptop. It *saw* the microscope image. It *reasoned* over the phase, the scene and the tray. It *heard* my yes straight from the audio, with no separate speech model. Three modalities, one file, one engine loaded once, about eight seconds from phase change to question. Pull the cable and nothing changes." *(pull it)*
 
 **The system, 15 s.**
-"Three devices, no cloud. The Jetson Orin Nano runs the video feed and is home to our phase model: 24.6 million parameters, 2.3 milliseconds a frame in TensorRT. The M5 laptop runs Gemma. The Kinova Gen3 does the motion, guided by a wrist RealSense and AprilTag calibration."
+"Three devices, no cloud. The Jetson Orin Nano runs the video feed and is home to our phase model: 24.6 million parameters, 2.3 milliseconds a frame in TensorRT. The M5 laptop runs the full multimodal Gemma 4, and the smaller Gemma 4 E2B runs on the Jetson's GPU too, through the same LiteRT-LM runtime. The Kinova Gen3 does the motion, guided by a wrist RealSense and AprilTag calibration."
 
 **Trust, 12 s.**
 "Gemma decides *what*, never *how*. It picks from the tray, never outputs a coordinate, and nothing moves without a spoken yes. 'Stop' and 'let go' are fixed keywords. The arm stays 4 mm off the table, and I'm holding the E-stop."
@@ -265,7 +272,7 @@ The whole AI side is one file, `gemma-4-E4B-it.litertlm` (3.66 GB, Gemma 4 E4B i
 **Close, 5 s.**
 "EdgeHand. It watches, predicts, and hands it over, fully offline."
 
-### Slides (8)
+### Slides (9)
 1. **Title.** "EdgeHand: Phase-Aware Robotic Instrument Handoff with On-Device Multimodal Gemma 4". Tagline: "The scrub nurse that never looks away: it watches, predicts, and hands it over, fully offline."
 2. **Why neurosurgery.** Millimetre vessels and seconds that matter. Too few experienced scrub nurses. OR video can't leave the room, so the intelligence has to be in the room.
 3. **Systems.** Three boxes, top to bottom, with the links between them:
@@ -280,12 +287,29 @@ The whole AI side is one file, `gemma-4-E4B-it.litertlm` (3.66 GB, Gemma 4 E4B i
    - ⇅ *Ethernet through the Jetson, Kortex API*
    - **Kinova Gen3, 7 DoF + Robotiq 2F-85 + wrist RealSense D435.** The loop is look → AprilTag table map → find tool → pick → present → release on tug.
    - Footer: "No internet. No cloud. Every model on-device."
-4. **Gemma: one file, three modalities.** Vision, text reasoning and audio rows from the Gemma table above, each with its input, output and time. Callouts:
-   - "3.66 GB `.litertlm`";
-   - "one LiteRT-LM engine, loaded once";
-   - "no separate speech model, no separate vision model".
-5. **The loop, timed.** The phase changes → vision ~6.5 s → decision ~1.5 s → spoken question → "yes" heard in 1–3 s → pick and hand over → release on tug.
-6. **Safe by design.** Gemma decides *what*; code decides *how*:
+4. **Gemma 4 × LiteRT-LM.** The headline technology slide.
+   - Left: **one file**. `gemma-4-E4B-it.litertlm` (3.66 GB) holds the vision encoder, audio encoder and language model. It's loaded once as one LiteRT-LM `Engine`: the language model on the GPU, vision and audio encoders on the CPU (XNNPACK), ~350 MB of compiled caches.
+   - Middle: **three modalities, one engine**, with times:
+     - *sees*: microscope frame → instruments, aneurysm, clip, phase read, ~6.5 s;
+     - *reasons*: phase + scene + tray → instrument and reason, ~1.5 s;
+     - *hears*: the surgeon's voice → words → yes / no / stop / which instrument, 1–3 s.
+   - Right: **runs on two edge devices**:
+     - MacBook M5: Gemma 4 E4B on the GPU (the live loop).
+     - NVIDIA Jetson Orin Nano: Gemma 4 E2B on the GPU (WebGPU), 1.7 s per request.
+
+     Same `.litertlm` format and the same API on both.
+   - Footer: "No cloud API, no separate speech model, no separate vision model."
+5. **Voice: talk to the robot.**
+   - **EdgeHand speaks first.** The laptop says "Clipping. Shall I bring the green clip applier?" (on-device speech).
+   - **The surgeon answers.** "Yes" fetches; "no" cancels; "no, the suction" redirects; "stop" and "let go" work any time. Push-to-talk (`v`) works too: "hand me the bipolar".
+   - **How it hears**, in three steps:
+     1. Gemma transcribes the 16 kHz audio with a neutral prompt.
+     2. Fixed keyword rules handle yes / no / stop / let go.
+     3. Gemma maps a named or described instrument onto the tray.
+   - **Why three steps:** with the tray in the prompt, Gemma heard "stop" as "clip applier".
+   - **Results:** 6/6 test phrases, 5/5 confirmation cases (yes / no / redirect / stop / unclear), 93% on 59 request phrasings, 1–3 s per command.
+6. **The loop, timed.** The phase changes → vision ~6.5 s → decision ~1.5 s → spoken question → "yes" heard in 1–3 s → pick and hand over → release on tug.
+7. **Safe by design.** Gemma decides *what*; code decides *how*:
    - whitelisted JSON;
    - no coordinates;
    - spoken yes required;
@@ -293,8 +317,8 @@ The whole AI side is one file, `gemma-4-E4B-it.litertlm` (3.66 GB, Gemma 4 E4B i
    - 4 mm table guard;
    - torque tug release;
    - E-stop.
-7. **Technical specs.** Hardware table, software table, and the phase model on the Jetson: 24.6 M params, 51 MB of engines, 2.34 ms per frame, ~255 MiB (under 4% of the board).
-8. **Results and close.**
+8. **Technical specs.** Hardware table, software table, and the phase model on the Jetson: 24.6 M params, 51 MB of engines, 2.34 ms per frame, ~255 MiB (under 4% of the board).
+9. **Results and close.**
    - Phase model: 95.7%.
    - Request understanding: 93%.
    - Tray naming: 88%.
@@ -310,10 +334,10 @@ The whole AI side is one file, `gemma-4-E4B-it.litertlm` (3.66 GB, Gemma 4 E4B i
 - **Why one model for vision, voice and reasoning?** One 3.66 GB file and one engine means one model to load, update and validate, and no glue between separate models. The same `.litertlm` runs wherever LiteRT-LM runs, so the brain can move to new hardware unchanged.
 - **What if Gemma is wrong?** It only suggests. The surgeon says no or names another instrument. Its outputs are restricted to the tray, and it never controls motion directly.
 - **Is this a VLA?** No. That's deliberate: models choose what, deterministic code decides how. We think that's the right split near people.
-- **Why not run Gemma on the Jetson?** We tried: LiteRT's GPU path ran out of memory on the 8 GB Orin Nano and the CPU path took 31 s per request. The laptop does it in 1.5–8 s, so the Jetson handles video and the laptop handles reasoning.
+- **Does Gemma run on the Jetson?** The smaller Gemma 4 E2B does: 1.7 s per request on the Jetson's GPU through LiteRT-LM. The full multimodal E4B (vision + audio) ran out of GPU memory on the 8 GB board, so the live loop runs E4B on the laptop and the Jetson handles video. Next, E2B on the Jetson can take the text and voice jobs.
 - **How fast is it?** About 8 s from a phase change to the question, 1–3 s for a voice command, and 20–40 s for a handover at a deliberately slow 20% speed.
 - **What about patient data?** None is used or shown. The clip is public and licensed, and the clinical labels and weights never left their source.
-- **Does the phase model fit on the Jetson?** Yes. It has 24.6 M parameters (49 MB in fp16). With TensorRT FP16 on our Orin Nano Super, it takes 2.3 ms per frame for ResNet50 plus 1.75 ms per 10-minute window for the MS-TCN, using ~255 MiB of GPU memory. Gemma is the model that doesn't fit.
+- **Does the phase model fit on the Jetson?** Yes. It has 24.6 M parameters (49 MB in fp16). With TensorRT FP16 on our Orin Nano Super, it takes 2.3 ms per frame for ResNet50 plus 1.75 ms per 10-minute window for the MS-TCN, using ~255 MiB of GPU memory. The model that doesn't fit is the full Gemma 4 E4B; the smaller E2B does.
 - **What would you build next?** Run the phase model live on the Jetson (TensorRT engines already built and benchmarked), feed Gemma's scene features into it alongside the CNN features, and use real surgical instruments with a 3D grasp from the RealSense depth stream.
 
 ---
