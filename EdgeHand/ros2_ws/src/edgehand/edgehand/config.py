@@ -145,6 +145,10 @@ KORTEX_READY_WAIT_S = 1.0          # after a refused action: how long to wait fo
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.0, 0.8
 GRIPPER_MAX_EFFORT = 50.0
+# Pre-open only as wide as the tool needs: fully open (85 mm) the fingers straddled a neighbouring tool on the way
+# down and picked up two. Opening = tool width + 2 * GRIPPER_OPEN_MARGIN_M, from vision's measured handle width.
+GRIPPER_STROKE_M = 0.085           # 2F-85 opening at GRIPPER_OPEN; 0 at fully closed (linear in between)
+GRIPPER_OPEN_MARGIN_M = 0.012      # clearance each side of the tool before closing
 # Missed grasp = after the lift the fingers closed past this (nothing between them). Sim: 0.745 on a 6 mm shaft,
 # 0.782 on nothing. MEASURE (Phase 1.6): close on nothing and on the thinnest shaft, set this between the two.
 GRIPPER_JOINT = "robotiq_85_left_knuckle_joint"    # in /joint_states (VERIFY the name on the real driver)

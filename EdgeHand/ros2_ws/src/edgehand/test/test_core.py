@@ -409,3 +409,16 @@ def test_tool_radius_override_raises_the_grasp():
     base = h.plan_targets((0.45, 0.0), (0, 1))["grasp"][0][2]
     fat = h.plan_targets((0.45, 0.0), (0, 1), tool_radius=config.TOOL_RADIUS_M + 0.005)["grasp"][0][2]
     assert np.isclose(fat - base, 0.005)
+
+
+def test_gripper_preopens_just_wider_than_the_tool():
+    from edgehand.handover import open_for_width
+    assert open_for_width(None) == config.GRIPPER_OPEN                   # unknown width: fully open
+    pos = open_for_width(0.014)                                           # a 14 mm precision handle
+    opening = config.GRIPPER_STROKE_M * (1 - (pos - config.GRIPPER_OPEN) / (config.GRIPPER_CLOSED - config.GRIPPER_OPEN))
+    assert np.isclose(opening, 0.014 + 2 * config.GRIPPER_OPEN_MARGIN_M)  # ~38 mm, not 85
+    assert config.GRIPPER_OPEN < pos < config.GRIPPER_EMPTY_POS           # never reads as "closed on nothing"
+    assert open_for_width(0.2) == config.GRIPPER_OPEN                     # wider than the stroke: fully open
+    r = FakeRobot(tug_after=3.0)
+    assert Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1), tool_width=0.014)[0]
+    assert r.calls[0] == f"grip{pos}"                                     # the pick opens to that, not fully

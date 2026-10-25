@@ -23,6 +23,16 @@ class Stopped(Exception):
     pass
 
 
+def open_for_width(width_m):
+    """Gripper command (0 = fully open .. GRIPPER_CLOSED) that opens just width + 2 * GRIPPER_OPEN_MARGIN_M.
+    None or an implausible width -> fully open."""
+    if width_m is None or not (0.0 < width_m < config.GRIPPER_STROKE_M):
+        return config.GRIPPER_OPEN
+    opening = min(config.GRIPPER_STROKE_M, width_m + 2 * config.GRIPPER_OPEN_MARGIN_M)
+    closed_frac = 1.0 - opening / config.GRIPPER_STROKE_M
+    return float(config.GRIPPER_OPEN + closed_frac * (config.GRIPPER_CLOSED - config.GRIPPER_OPEN))
+
+
 class Handover:
     def __init__(self, robot, log=print, state=lambda s: None, check_grasp=True):
         self.robot, self.log, self.state = robot, log, state
@@ -111,7 +121,7 @@ class Handover:
             self.state("error")
             return False, str(e)
 
-    def run(self, grasp_xy, handle_dir, relocate=None, tool_radius=None):
+    def run(self, grasp_xy, handle_dir, relocate=None, tool_radius=None, tool_width=None):
         """Pick the tool at grasp_xy and hand it over. After a missed grasp the arm goes back to the look pose and
         relocate() -> (grasp_xy, handle_dir) or None says where the tool is now (relocate=None: no retries).
         A tool still in the gripper from an interrupted handover is handed over first. Returns (ok, message)."""
@@ -125,7 +135,7 @@ class Handover:
         try:
             for attempt in range(1, config.PICK_ATTEMPTS + 1):
                 t = self.plan_targets(grasp_xy, handle_dir, self._current_R(), tool_radius)
-                if self._pick(t):
+                if self._pick(t, open_for_width(tool_width)):
                     break
                 self.log(f"missed the tool (try {attempt} of {config.PICK_ATTEMPTS})")
                 self._step("open", r.gripper(config.GRIPPER_OPEN))     # at hover height, nothing between the fingers
@@ -161,11 +171,12 @@ class Handover:
         except Exception:
             return None
 
-    def _pick(self, t):
-        """Open, down to the grasp (the last DESCEND_SLOW_M slowly), close, lift. False = nothing between the fingers."""
+    def _pick(self, t, open_pos=None):
+        """Open (just enough for the tool), down to the grasp (the last DESCEND_SLOW_M slowly), close, lift.
+        False = nothing between the fingers."""
         r = self.robot
         self.state("picking")
-        self._step("open", r.gripper(config.GRIPPER_OPEN))
+        self._step("open", r.gripper(config.GRIPPER_OPEN if open_pos is None else open_pos))
         self._step("approach", r.move_free(*t["hover"]))
         self._step("descend", r.move_line(*t["slow"], collisions=False))
         self._step("descend slowly", r.move_line(*t["grasp"], collisions=False, scale=config.DESCEND_SLOW_SCALE))

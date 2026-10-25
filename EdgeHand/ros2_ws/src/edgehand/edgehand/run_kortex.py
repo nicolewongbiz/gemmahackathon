@@ -274,11 +274,15 @@ def main():
             arm_state.update(s, current["tool"])
     h = Handover(robot, log=print, state=on_state) if robot else None
 
+    seen_width = {}
+
     def relocate(tool):
         time.sleep(config.LOOK_SETTLE_S)
         eyes.want = tool
         tools = eyes.see(a.show) or []
         hit = [t for t in tools if t["tool"] == tool]
+        if hit:
+            seen_width[tool] = hit[0].get("width_m")
         return (hit[0]["grasp_xy"], hit[0]["handle_dir"]) if hit else None
 
     def on_interrupt():
@@ -351,7 +355,8 @@ def main():
             current["tool"] = tool
             try:
                 radius = getattr(config, "TOOL_RADIUS_BY_CLASS", {}).get(tool)
-                ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool), tool_radius=radius)
+                ok, msg = h.run(found[0], found[1], relocate=lambda: relocate(tool), tool_radius=radius,
+                                tool_width=seen_width.get(tool))
             finally:
                 requests.finish()
                 if arm_state:
