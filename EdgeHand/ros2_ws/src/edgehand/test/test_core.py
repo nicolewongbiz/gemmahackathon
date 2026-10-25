@@ -422,3 +422,26 @@ def test_gripper_preopens_just_wider_than_the_tool():
     r = FakeRobot(tug_after=3.0)
     assert Handover(r, log=lambda *a: None).run((0.45, 0.0), (0, 1), tool_width=0.014)[0]
     assert r.calls[0] == f"grip{pos}"                                     # the pick opens to that, not fully
+
+
+def test_put_down_uses_the_pick_rules_and_opens_only_at_the_table():
+    r = FakeRobot()
+    r.grip_pos = 0.6                                                     # holding something
+    h = Handover(r, log=lambda *a: None)
+    ok, msg = h.put_down((0.45, 0.0))
+    assert ok, msg
+    assert r.calls == ["free", "line", "slow line", f"grip{config.GRIPPER_OPEN}", "line", "look"]
+    lowest = min(table_clearance(p, R) for p, R in r.poses)
+    assert np.isclose(lowest, config.TABLE_CLEARANCE_M)                 # down to the usual grasp height, no lower
+    i_open = r.calls.index(f"grip{config.GRIPPER_OPEN}")
+    p_open, R_open = r.poses[i_open - 1]                                 # the pose it opened at: the bottom
+    assert np.isclose(table_clearance(p_open, R_open), config.TABLE_CLEARANCE_M)
+
+
+def test_free_spot_avoids_the_tools():
+    from edgehand.vision import free_spot
+    xs, ys = zip(*config.TABLE_TAGS.values())
+    tools = [{"grasp_xy": np.array([np.mean(xs), np.mean(ys)])}]          # one tool dead centre
+    spot, clear = free_spot(tools)
+    assert np.linalg.norm(spot - tools[0]["grasp_xy"]) > 0.09 and clear
+    assert min(xs) < spot[0] < max(xs) and min(ys) < spot[1] < max(ys)

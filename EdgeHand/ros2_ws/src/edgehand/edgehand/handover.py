@@ -94,6 +94,35 @@ class Handover:
         pos = f() if f else None
         return pos is not None and config.GRIPPER_HOLDING_MIN < pos < config.GRIPPER_EMPTY_POS
 
+    def put_down(self, xy, tool_radius=None):
+        """Put whatever the gripper holds back on the tray at xy: hover above it, descend (the last bit slowly) to the
+        usual grasp height, open, lift, back to the look pose. Same clearance rules as a pick. (ok, message)."""
+        self.stop_flag.clear()
+        r = self.robot
+        R0 = self._current_R()
+        yaw_dir = (np.array([R0[1, 0], R0[1, 1]]) if R0 is not None and config.FINGERS_ALONG == "x"
+                   else np.array([R0[0, 0], R0[0, 1]]) if R0 is not None else np.array([0.0, 1.0]))
+        if np.linalg.norm(yaw_dir) < 1e-6:
+            yaw_dir = np.array([0.0, 1.0])
+        try:
+            t = self.plan_targets(xy, yaw_dir / np.linalg.norm(yaw_dir), R0, tool_radius)
+            self.log(f"putting the held tool down at ({xy[0]:.3f}, {xy[1]:.3f})")
+            self.state("putting down")
+            self._step("approach", r.move_free(*t["hover"]))
+            self._step("descend", r.move_line(*t["slow"], collisions=False))
+            self._step("descend slowly", r.move_line(*t["grasp"], collisions=False, scale=config.DESCEND_SLOW_SCALE))
+            self._step("open", r.gripper(config.GRIPPER_OPEN))
+            self._step("lift", r.move_line(*t["hover"], collisions=False))
+            self._step("look", r.look())
+            self.state("idle")
+            return True, "put down"
+        except Stopped as e:
+            self.state("stopped")
+            return False, f"stopped during {e}"
+        except (RuntimeError, ValueError) as e:
+            self.state("error")
+            return False, str(e)
+
     def hand_over_whats_held(self):
         """Finish an interrupted handover: carry whatever is in the gripper to the operator, wait for the tug (or
         RELEASE), open, retreat, back to the look pose. Returns (ok, message). Never opens the gripper in the air."""

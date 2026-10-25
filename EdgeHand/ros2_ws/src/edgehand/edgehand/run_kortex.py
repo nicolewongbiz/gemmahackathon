@@ -291,16 +291,23 @@ def main():
 
     try:
         if robot:
-            if h and h.holding_something():
-                print("the gripper is holding something from before: handing it over first (pull it, or say release)")
-                ok, msg = h.hand_over_whats_held()
-                print("handover:", "OK" if ok else "FAILED", msg)
-                if not ok:
-                    return
             print("moving to the look pose")
             if not robot.look():
                 print("can't reach the look pose; stopping")
                 return
+            if h and h.holding_something():
+                # a restart is a reset, not a resume: put the tool back on the tray where nothing else lies
+                time.sleep(config.LOOK_SETTLE_S)
+                tools = eyes.see(a.show) or []
+                from edgehand.vision import free_spot
+                spot, clear = free_spot([dict(t, handle_xy=t.get("handle_xy", t["grasp_xy"])) for t in tools])
+                print(f"the gripper is holding something from before: putting it down at ({spot[0]:.3f}, {spot[1]:.3f})"
+                      + ("" if clear else " (tray is crowded; closest free spot)"))
+                ok, msg = h.put_down(spot, tool_radius=max(getattr(config, "TOOL_RADIUS_BY_CLASS", {}).values(),
+                                                           default=config.TOOL_RADIUS_M))
+                print("put down:", "OK" if ok else "FAILED", msg)
+                if not ok:
+                    return
         time.sleep(config.LOOK_SETTLE_S)
         if a.look_only or not robot:
             while True:

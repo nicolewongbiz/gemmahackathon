@@ -354,6 +354,20 @@ def grasp_point(ferrule, handle_dir, colour=None):
     return np.asarray(ferrule, float) + sign * np.asarray(handle_dir, float) * dist
 
 
+def free_spot(tools, keep_clear_m=0.09, edge_m=0.06):
+    """A table point inside the tag rectangle, edge_m in from its edges, farthest from every detected tool (their
+    grasp and handle points): where a held tool can be put down. Falls back to the rectangle's centre."""
+    lo, hi = tray_bounds(0.0)
+    pts = [np.asarray(p, float) for t in tools for p in (t["grasp_xy"], t.get("handle_xy", t["grasp_xy"]))]
+    best, best_d = (lo + hi) / 2, -1.0
+    for x in np.linspace(lo[0] + edge_m, hi[0] - edge_m, 9):
+        for y in np.linspace(lo[1] + edge_m, hi[1] - edge_m, 9):
+            d = min((np.linalg.norm(np.array([x, y]) - p) for p in pts), default=1.0)
+            if d > best_d:
+                best, best_d = np.array([x, y]), d
+    return best, best_d >= keep_clear_m
+
+
 def on_tray(xy):
     """Inside the rectangle through the TABLE_TAGS centres, plus TRAY_MARGIN_M."""
     xs, ys = zip(*config.TABLE_TAGS.values())
