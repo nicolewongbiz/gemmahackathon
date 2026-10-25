@@ -102,6 +102,23 @@ The lowest the gripper ever gets is its closed fingertips (the 2F-85 tips move ~
 
 Measured in MuJoCo (§6): the lowest gripper point is 0.7 mm below the nominal clearance (pad shape), so 5.3 mm with the default. Picks work the same from 4 to 10 mm clearance in sim; above ~6 mm the pads hold the shaft with only their bottom edge, which a real gripper is less forgiving of.
 
+### 2.3.2 How a pick works, start to finish
+The full narrative with the reasoning is in `../SYSTEM_AND_PITCH.md` §5b; this is the spec version.
+
+| Step | What happens | Where the numbers come from |
+|---|---|---|
+| Calibrate (per site) | Closed fingertips pinch paper on each of the 4 tags: tag positions **and** table heights in one pass; a plane through the 4 touches is the table. Look pose saved from the arm | `measure_tags` → `data/calibration.json`; venue touches agree within 1.9 mm |
+| Look | Arm at the look pose; the Jetson streams the RealSense colour frame; tags → pixel→table homography (2 tags suffice, last fit reused) | `TableMap`; fit error ~3 mm |
+| Find | Top-down warp; anything unlike the paper is an object; blobs touching the view edge are dropped (the fingers); width profile along the axis → handle end and ferrule; grasp 2 cm into the handle | `find_tools_contrast`, `GRASP_SIDE`, per-class offsets |
+| Name | Dominant colour accent on the grip: green / red cap / yellow collar / blue collar | `colour_class`, ranges measured on real frames |
+| Plan | Flange targets from the grasp point, table plane and handle radius; **refused before any motion** if the closed fingertips would come within 4 mm of the table or leave the workspace; the yaw needing the smaller wrist turn is used, handover orientation flipped to match | `plan_targets`, `table_clearance` |
+| Move | Rise → turn at height → travel at or above a floor 15 cm over the table → descend; 0.10 m/s travel, 0.08 descend, last 3 cm at 0.025 m/s; completion from the measured pose; stall watchdog; Home joint move first if a joint sits at its limit | `kortex_robot.free_waypoints`, `_execute` |
+| Grasp | Pre-open to the tool's width + 12 mm/side; close; lift; finger position past `GRIPPER_EMPTY_POS` = miss → look again, retry ≤ 3 | `open_for_width`, `_holding` |
+| Present | Fixed point at chest height, handle toward the operator; torque baseline; open on a tug (Δτ ≥ 1.5 N·m) or "release"; never opens in the air | `TugDetector` |
+| Recover | Restart with a tool in hand = put it down on a free spot; a request mid-handover is kept (latest only) and runs once the tool is taken | `put_down`, `free_spot`, `Requests` |
+
+**The surgical phase model** that drives the demo's requests (ResNet50 fine-tuned from ImageNet → 1 fps features → MS-TCN → Viterbi) is documented in `../SYSTEM_AND_PITCH.md` ("How the phase model was built"); its code is in `../NeurosurgicalPhaseRecognition/`.
+
 ### 2.4 Handover and release
 - `HANDOVER_XYZ` is a fixed point at the operator's chest height, away from their face. The tool is rotated so the handle points along `OPERATOR_DIR` (towards the operator).
 - Once the arm is still, `handover_node` records the joint torques as a baseline. A tug changes the wrist torques. When the change stays above `TUG_TORQUE_NM` for `TUG_SAMPLES` samples, the gripper opens. Pi button **RELEASE** (B) opens it too.
