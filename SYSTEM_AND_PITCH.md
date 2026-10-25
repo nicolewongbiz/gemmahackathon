@@ -83,9 +83,31 @@ All of it is **Gemma 4 E4B on LiteRT-LM, on the laptop**. One model handles visi
 1. **The red E-stop** is in a human hand at all times.
 2. **Human in the loop:** Gemma's suggestion moves nothing until the surgeon says "yes".
 3. **Safety words without the model:** "stop", "wait", "let go" are matched by fixed keywords on the transcript. (In testing, a combined prompt made Gemma hear "stop" as "clip applier". So we split hearing from deciding.)
-4. **The table is never touched:** the table plane is measured with fingertip touches on the four tags. Any grasp that would put the closed fingertips less than 4 mm above it is refused. The last 3 cm run at 6% speed.
-5. **Motion style:** reaches are slow (20% speed) and rise before moving sideways, so nothing travels low over the tray.
+4. **The table is never touched:** the table plane is measured with fingertip touches on the four tags. Any grasp that would put the closed fingertips less than 4 mm above it is refused before anything moves.
+5. **Motion style:** free moves rise first, turn only at height, travel at or above a floor 15 cm over the table, then descend; travel at 0.10 m/s, the last 3 cm onto the tool at 0.025 m/s.
 6. **Release only on intent:** the gripper opens on a deliberate tug (joint-torque change, ~100× the sensor noise) or a spoken "let go".
+
+## 5b. How the arm picks a tool up
+
+No ROS, no MoveIt, no learned grasping: a calibrated camera, classical vision, and a small state machine over the Kinova Kortex API. Every number below is measured on the cell, not assumed.
+
+**Calibrate once per site (6 minutes).** Four AprilTags are taped at the tray corners. For each, the closed fingertips are jogged down to pinch a sheet of paper on the tag's centre and the pose is read: that gives the tag's position in the arm's base frame **and** the table height under it. A plane through the four touches is the table (the venue's four agree within 1.9 mm). Because the same gripper measured it, ruler errors in the fingertip length cancel out. The look pose (camera straight down, ~0.5 m up, all four tags in view) is saved the same way. Everything lands in `data/calibration.json`; moving the cell means re-measuring, not editing code.
+
+**Look.** Before every pick the arm goes to the look pose and the Jetson streams the RealSense colour frame. The tags in the frame give a pixel→table homography (2 tags are enough; the last good fit is reused if a hand hides them), so tool positions come out in metres in the arm's frame with ~3 mm error.
+
+**Find and name.** The tray is warped to a top-down view. Anything that differs from the paper's colour is an object; blobs touching the edge of the view (the gripper's own fingers) are dropped. Along each blob's long axis its width profile says which end is the handle (wide) and where the metal starts (the width drops), so the grasp point is placed 2 cm into the handle from the ferrule, leaving the free end for the surgeon. The handle's **dominant colour accent** names it (green, red cap, yellow collar, blue collar), which works for black handles too. Gemma is not in this loop; it only ever names *which* tool, never where.
+
+**Plan the pick.** The target is the flange pose that puts the pads on the handle at the measured table height plus the handle's radius. Before anything moves, every waypoint is checked: inside the workspace, and the closed fingertips at least **4 mm above the table plane** at the bottom of the descent; anything lower is refused outright. The fingers close across the tool, so the grasp is the same turned by 180°; the planner takes the yaw needing the smaller wrist turn and flips the handover orientation to match.
+
+**Move, safely by construction.** Free moves always go *rise → turn at height → travel at or above a floor 15 cm above the table → descend over the target*, so nothing ever travels low over the tray. Travel runs at the arm's 0.10 m/s limit, the straight descent at 0.08 m/s, and the last 3 cm at 0.025 m/s. Each reach is confirmed from the measured pose, not just the controller's "done" message, and a reach that stops making progress is stopped. From Kinova's folded Retract pose a joint-space Home move runs first, because Cartesian moves are refused from a joint limit.
+
+**Grasp and check.** The gripper pre-opens to the tool's measured width plus 12 mm each side (~38 mm, not the full 85, so it can't straddle a neighbour), closes on the handle, lifts, and reads its own finger position: closed past the "empty" threshold means a miss, and the arm goes back to the look pose, looks again and retries, up to three times.
+
+**Present and release.** The tool is carried to a fixed point at the surgeon's chest height with the handle toward them. The arm records the wrist joint torques as a baseline and opens when a deliberate tug changes them (~1.5 N·m, roughly 100× the sensor noise), or on a spoken "let go". It never opens the gripper in the air.
+
+**Recover.** A restart with a tool still in the hand is a reset, not a resume: the arm rises, vision picks a free spot on the tray, and the tool is put down there with the same descent rules. A request arriving mid-handover isn't queued up: only the latest one is kept, and it runs once the surgeon has taken the current tool.
+
+**What it took on the day.** The table plane from fingertip touches, the view-edge rule, the "rise before you turn" order, the measured-pose completion check and the pre-open width each came from a specific failure on the real arm; the MuJoCo sim and 89 unit tests re-run them all before every change.
 
 ## 6. What's live, and what isn't
 
