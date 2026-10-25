@@ -124,17 +124,21 @@ TABLE_CLEARANCE_M = 0.004          # closed fingertips above the table at the bo
 TCP_OFFSET_M = FINGERTIP_CLOSED_M + TABLE_CLEARANCE_M - TOOL_RADIUS_M
 AIR_GAP_M = 0.0                    # first runs on the real arm: 0.03 = every pick closes 3 cm above the tools
 DESCEND_SLOW_M = 0.03              # the last 3 cm down to a grasp run at DESCEND_SLOW_SCALE
-DESCEND_SLOW_SCALE = 0.05          # (a wrong table height then touches gently, with time to hit the E-stop)
+DESCEND_SLOW_SCALE = 0.0625        # (a wrong table height then touches gently, with time to hit the E-stop)
 FINGERS_ALONG = "x"                # flange axis the 2F-85 fingers close along (check in RViz, Phase 1.6)
 HOVER_M = 0.12                     # approach / lift height above the grasp
 VEL_SCALE, ACC_SCALE = 0.2, 0.2
 # ---- Motion without ROS: the Kortex API straight from this computer (edgehand/kortex_robot.py, run_kortex.py) ----
 # The arm's own Cartesian controller, no collision planning: free moves rise first, translate at the higher of the
 # two heights, then descend, so lateral motion never happens low over the tray. Same clearance checks as MoveIt.
-KORTEX_LINEAR_SPEED_MPS = 0.05     # at VEL_SCALE; move_line's scale= (the slow last 3 cm) scales it down
+# Speeds (the arm's own Cartesian soft limit is 0.10 m/s; the runner caps at that). Travel legs are far from the
+# table, so they run at the limit; straight descents/lifts at 0.08; the last DESCEND_SLOW_M to the grasp at
+# KORTEX_LINEAR_SPEED_MPS * DESCEND_SLOW_SCALE / VEL_SCALE = 0.025 m/s.
+KORTEX_TRAVEL_SPEED_MPS = 0.10     # free moves: rise, turn, translate at height, descend to hover
+KORTEX_LINEAR_SPEED_MPS = 0.08     # move_line: the straight descend / lift / retreat legs
 TRAVEL_MIN_FINGERTIP_M = 0.15      # every sideways leg of a free move keeps the closed fingertips at least this
                                    # high above the table (tools are < 6 cm): the "safe path" floor
-KORTEX_ANGULAR_SPEED_DPS = 15.0
+KORTEX_ANGULAR_SPEED_DPS = 30.0
 KORTEX_ACTION_TIMEOUT_S = 120.0    # a reach is also finished when the measured pose matches, and
 KORTEX_STALL_S = 6.0               # stopped when the pose hasn't changed for this long (crawling / stuck)
 KORTEX_READY_WAIT_S = 1.0          # after a refused action: how long to wait for a settled state before logging it

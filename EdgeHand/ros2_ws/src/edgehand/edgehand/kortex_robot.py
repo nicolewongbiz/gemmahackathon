@@ -294,7 +294,7 @@ class KortexRobot:
             self.log("kortex: already at the target")
             return False if too_low(p, R) else True
         for wp, wR in free_waypoints(p0, p, R, R0):
-            if not self._reach(wp, wR, config.KORTEX_LINEAR_SPEED_MPS):
+            if not self._reach(wp, wR, config.KORTEX_TRAVEL_SPEED_MPS):
                 return False
         return True
 

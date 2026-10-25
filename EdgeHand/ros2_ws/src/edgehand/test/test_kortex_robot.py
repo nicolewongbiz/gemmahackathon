@@ -211,7 +211,7 @@ def test_full_handover_on_the_kortex_robot_keeps_lateral_moves_high():
     # the slow last 3 cm used a lower speed
     speeds = [s for _, s in r.reaches]
     assert min(speeds) == pytest.approx(config.KORTEX_LINEAR_SPEED_MPS * config.DESCEND_SLOW_SCALE / config.VEL_SCALE)
-    assert max(speeds) == config.KORTEX_LINEAR_SPEED_MPS
+    assert max(speeds) == config.KORTEX_TRAVEL_SPEED_MPS
     # the lowest flange ever commanded keeps the closed fingertips at the clearance
     low = min(table_clearance(p, tool_down_R((0, 1))) for p, _ in r.reaches)
     assert low == pytest.approx(config.TABLE_CLEARANCE_M, abs=1e-6)
