@@ -381,6 +381,7 @@ In the multi-tool sim the remaining misses are all in intent, for the sim-only p
 
 | Symptom | Fix |
 |---|---|
+| The dock's USB-Ethernet adapter stops receiving (link "active", often 1000baseT, `netstat -I en7` received packets frozen, no ARP from the arm) | Reseat the adapter. If that fails, **route the arm through the Jetson** (used at the hackathon): arm's Ethernet into the Jetson's RJ45; on the Jetson (sudo) `ip link set enP8p1s0 up; ip addr replace 192.168.1.12/24 dev enP8p1s0; sysctl -w net.ipv4.ip_forward=1; iptables -t nat -A POSTROUTING -s 192.168.55.0/24 -o enP8p1s0 -j MASQUERADE`; on the Mac `sudo route -n add 192.168.1.0/24 192.168.55.1`. Neither survives a reboot. Kortex TCP + UDP feedback both work through it (1.7 ms) |
 | `ping 192.168.1.10` fails | Cable into the arm's base RJ45, link light on, static 192.168.1.11 on that adapter (Phase 1.1), Wi-Fi off if it uses 192.168.1.x |
 | `vision_node` / `edgehand.camera`: no frames | Wrong `CAMERA_USB_INDEX` (`--list`), USB 2 or charge-only cable, another app holding the camera. On a Mac, allow camera access for the terminal |
 | NOT CALIBRATED at the look pose | All 4 tags in view and not hidden by the fingers (Phase 1.5), lighting, print size 5 cm |
